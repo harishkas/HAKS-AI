@@ -1,0 +1,7 @@
+# Core runtime dependencies for HAKS (Phase 1 Foundation)
+PySide6==6.12.0
+pydantic==2.14.3
+python-dotenv==1.2.4
+
+# Testing & Development
+pytest==9.2.0
