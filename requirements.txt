@@ -7,6 +7,9 @@ python-dotenv==1.2.4
 httpx==0.28.1
 keyring==25.7.0
 
+# Phase 4 Memory Encryption at Rest
+cryptography==50.0.2
+
 # Testing & Development
 pytest==9.2.0
 pytest-asyncio==1.4.1.post1

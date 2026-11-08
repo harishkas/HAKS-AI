@@ -31,15 +31,32 @@ class DatabaseManager:
         }
 
     def get_db_path(self, db_name: str) -> Path:
-        """Get the absolute filesystem path for a named database."""
+        """Get the absolute filesystem path for a named database, ensuring directory exists."""
         if db_name not in self._db_files:
             raise ValueError(f"Unknown database name: '{db_name}'. Available: {list(self._db_files.keys())}")
-        return self.data_dir / self._db_files[db_name]
+        target_path = self.data_dir / self._db_files[db_name]
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        return target_path
+
+    def _auto_migrate_legacy_db_files(self, db_name: str, target_path: Path) -> None:
+        """Automatically migrate legacy flat database files if they exist."""
+        flat_db = self.data_dir / f"{db_name}.db"
+        if flat_db.exists() and not target_path.exists():
+            try:
+                logger.info("Migrating legacy flat database %s -> %s", flat_db, target_path)
+                flat_db.rename(target_path)
+                for ext in ["-wal", "-shm"]:
+                    companion = self.data_dir / f"{db_name}.db{ext}"
+                    if companion.exists():
+                        target_companion = Path(f"{target_path}{ext}")
+                        companion.rename(target_companion)
+            except Exception as exc:
+                logger.warning("Could not auto-migrate flat database %s: %s", db_name, exc)
 
     def create_connection(self, db_name: str) -> sqlite3.Connection:
         """Create and configure a new SQLite connection with WAL mode and foreign keys."""
         db_path = self.get_db_path(db_name)
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._auto_migrate_legacy_db_files(db_name, db_path)
 
         conn = sqlite3.connect(
             str(db_path),
@@ -80,6 +97,23 @@ class DatabaseManager:
             logger.info("Initializing database: %s -> %s", db_name, db_path)
             with self.session(db_name) as conn:
                 conn.executescript(schema_sql)
+
+        # Ensure Phase 4 schema additions exist in pre-existing tables
+        for db_name, tbl_name, col_name, col_type in [
+            ("personal_memory", "personal_memories", "source_conversation_id", "TEXT"),
+            ("work_memory", "work_memories", "source_conversation_id", "TEXT"),
+            ("memory_proposals", "memory_proposals", "suggested_title", "TEXT"),
+        ]:
+            try:
+                with self.session(db_name) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(f"PRAGMA table_info({tbl_name});")
+                    cols = [c[1] for c in cursor.fetchall()]
+                    if cols and col_name not in cols:
+                        cursor.execute(f"ALTER TABLE {tbl_name} ADD COLUMN {col_name} {col_type};")
+            except Exception as e:
+                logger.debug("Column migration note for %s.%s: %s", tbl_name, col_name, e)
+
         logger.info("All 5 HAKS databases initialized successfully.")
 
     def get_stats(self) -> dict[str, dict]:
@@ -126,6 +160,25 @@ class DatabaseManager:
             for table in tables:
                 cursor.execute(f"DELETE FROM {table};")
         logger.info("Domain '%s' cleared successfully.", db_name)
+
+    def checkpoint_all(self) -> None:
+        """Flush WAL changes into main database files for all active domains."""
+        for db_name in self._db_files:
+            db_path = self.get_db_path(db_name)
+            if db_path.exists():
+                try:
+                    with self.session(db_name) as conn:
+                        conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                except Exception as exc:
+                    logger.warning("WAL checkpoint failed on '%s': %s", db_name, exc)
+
+    def vacuum_domain(self, db_name: str) -> None:
+        """Run VACUUM on a domain database to defragment and reclaim disk space."""
+        if db_name not in self._db_files:
+            raise ValueError(f"Unknown database name: '{db_name}'.")
+        with self.session(db_name) as conn:
+            conn.execute("VACUUM;")
+        logger.info("Domain '%s' vacuumed successfully.", db_name)
 
 
 _db_manager_instance: Optional[DatabaseManager] = None

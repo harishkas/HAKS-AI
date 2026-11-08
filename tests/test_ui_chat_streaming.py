@@ -16,6 +16,12 @@ def controller(temp_workspace: AppConfig, test_db_manager: DatabaseManager) -> A
     return AppController(config=temp_workspace, db_manager=test_db_manager)
 
 
+@pytest.fixture(autouse=True)
+def mock_worker_start(monkeypatch):
+    """Prevent unmocked background streaming threads during UI tests."""
+    monkeypatch.setattr("ui.views.chat_view.AIInferenceWorker.start", lambda self: None)
+
+
 def test_chat_view_engine_selector(qapp, controller: AppController):
     """Verify engine and model combo boxes update settings and reflect options."""
     chat = ChatView(controller)

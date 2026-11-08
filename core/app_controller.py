@@ -13,7 +13,15 @@ import uuid
 from config.settings import AppConfig, get_settings
 from core.events import ApplicationEvents, get_app_events
 from core.logger import get_logger
+from memory.context_builder import MemoryContextBuilder
+from memory.models import MemoryDomain, MemoryProposal
+from memory.personal_memory import PersonalMemoryManager
+from memory.proposal_detector import MemoryProposalDetector
+from memory.proposal_manager import MemoryProposalManager
+from memory.work_memory import WorkMemoryManager
+from storage.backup_manager import BackupManager
 from storage.database import DatabaseManager, get_db_manager
+from storage.migration import StorageMigrationService
 
 if TYPE_CHECKING:
     from ai.manager import AIEngineManager
@@ -40,6 +48,17 @@ class AppController:
         self._is_mic_muted: bool = False
         self._current_theme: str = self.get_setting("theme", self.config.ui.theme)
         self._ai_manager: Optional[Any] = None
+
+        # Phase 4 Memory Architecture Subsystems
+        self.personal_memory = PersonalMemoryManager(self.config, self.db)
+        self.work_memory = WorkMemoryManager(self.config, self.db)
+        self.proposal_detector = MemoryProposalDetector()
+        self.proposal_manager = MemoryProposalManager(
+            self.config, self.db, self.personal_memory, self.work_memory
+        )
+        self.context_builder = MemoryContextBuilder(self.personal_memory, self.work_memory)
+        self.backup_manager = BackupManager(self.config, self.db, self.personal_memory.encryption)
+        self.migration_service = StorageMigrationService(self.config, self.db)
 
         logger.info("AppController initialized. Current theme: %s", self._current_theme)
 
@@ -279,6 +298,20 @@ class AppController:
         # Broadcast signal to all UI listeners (Main Window, Floating Assistant)
         self.events.message_received.emit(conv_id, msg_id, role, content)
         self.events.conversation_list_updated.emit()
+
+        # Automatic Memory Proposal Detection (User review required before permanent save)
+        if role == "user":
+            try:
+                proposal = self.proposal_detector.detect_proposal(
+                    user_text=content,
+                    source_conversation_id=conv_id,
+                )
+                if proposal:
+                    self.proposal_manager.create_proposal(proposal)
+                    self.events.memory_proposal_created.emit(proposal.model_dump())
+            except Exception as exc:
+                logger.error("Error during memory proposal detection: %s", exc)
+
         return msg_data
 
     # --------------------------------------------------------------------------
@@ -337,68 +370,76 @@ class AppController:
     # Personal Memory Operations
     # --------------------------------------------------------------------------
 
-    def get_personal_memories(self, search: str = "") -> list[dict]:
-        """Fetch records from personal_memory.db."""
-        memories = []
-        try:
-            with self.db.session("personal_memory") as conn:
-                query = """
-                    SELECT id, title, content, category, tags, created_at, importance
-                    FROM personal_memories
-                    WHERE is_archived = 0
-                """
-                params = []
-                if search:
-                    query += " AND (title LIKE ? OR content LIKE ? OR tags LIKE ?)"
-                    term = f"%{search}%"
-                    params.extend([term, term, term])
-                query += " ORDER BY created_at DESC;"
-
-                for r in conn.execute(query, params).fetchall():
-                    memories.append({
-                        "id": str(r["id"]),
-                        "title": str(r["title"]),
-                        "content": str(r["content"]),
-                        "category": str(r["category"] or "general"),
-                        "tags": str(r["tags"] or ""),
-                        "created_at": str(r["created_at"]),
-                        "importance": int(r["importance"]),
-                    })
-        except Exception as exc:
-            logger.error("Error fetching personal memories: %s", exc)
-        return memories
+    def get_personal_memories(self, search: str = "", category: Optional[str] = None) -> list[dict]:
+        """Fetch records from personal_memory.db via PersonalMemoryManager."""
+        items = self.personal_memory.get_all_memories(search=search, category=category)
+        return [
+            {
+                "id": m.id,
+                "title": m.title,
+                "content": m.content,
+                "category": m.category,
+                "tags": ", ".join(m.tags) if isinstance(m.tags, list) else str(m.tags or ""),
+                "created_at": m.created_at,
+                "importance": m.importance,
+                "source_conversation_id": m.source_conversation_id,
+            }
+            for m in items
+        ]
 
     def add_personal_memory(
-        self, title: str, content: str, category: str = "general", tags: str = "", importance: int = 1
+        self,
+        title: str,
+        content: str,
+        category: str = "general",
+        tags: str = "",
+        importance: int = 1,
+        source_conversation_id: Optional[str] = None,
     ) -> str:
         """Add a persistent record to Personal Memory."""
-        mem_id = f"pm_{uuid.uuid4().hex[:10]}"
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-        with self.db.session("personal_memory") as conn:
-            conn.execute(
-                """
-                INSERT INTO personal_memories (id, title, content, category, tags, importance, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                (mem_id, title, content, category, tags, importance, now, now),
-            )
-
+        tags_list = [t.strip() for t in tags.split(",") if t.strip()] if isinstance(tags, str) else (tags or [])
+        mem_id, is_new = self.personal_memory.add_memory(
+            title=title,
+            content=content,
+            category=category,
+            tags=tags_list,
+            importance=importance,
+            source_conversation_id=source_conversation_id,
+        )
         self.events.memory_domain_updated.emit("personal")
-        logger.info("Added Personal Memory: %s ('%s')", mem_id, title)
         return mem_id
+
+    def update_personal_memory(
+        self,
+        memory_id: str,
+        title: Optional[str] = None,
+        content: Optional[str] = None,
+        category: Optional[str] = None,
+        tags: Optional[str] = None,
+        importance: Optional[int] = None,
+    ) -> bool:
+        """Update an existing personal memory record."""
+        tags_list = [t.strip() for t in tags.split(",") if t.strip()] if isinstance(tags, str) else None
+        updated = self.personal_memory.update_memory(
+            memory_id=memory_id,
+            title=title,
+            content=content,
+            category=category,
+            tags=tags_list,
+            importance=importance,
+        )
+        if updated:
+            self.events.memory_domain_updated.emit("personal")
+        return updated
 
     def delete_personal_memory(self, memory_id: str) -> None:
         """Delete an individual record from Personal Memory."""
-        with self.db.session("personal_memory") as conn:
-            conn.execute("DELETE FROM personal_memories WHERE id = ?;", (memory_id,))
-
+        self.personal_memory.delete_memory(memory_id)
         self.events.memory_domain_updated.emit("personal")
-        logger.info("Deleted Personal Memory record: %s", memory_id)
 
     def clear_personal_memory(self) -> None:
         """Clear Personal Memory completely (never touches Work Memory)."""
-        self.db.clear_domain("personal_memory")
+        self.personal_memory.clear_domain()
         self.events.memory_domain_updated.emit("personal")
 
     # --------------------------------------------------------------------------
@@ -406,69 +447,146 @@ class AppController:
     # --------------------------------------------------------------------------
 
     def get_work_memories(self, project: str = "", search: str = "") -> list[dict]:
-        """Fetch records from work_memory.db."""
-        memories = []
-        try:
-            with self.db.session("work_memory") as conn:
-                query = """
-                    SELECT id, project_name, title, content, tags, created_at, importance
-                    FROM work_memories
-                    WHERE is_archived = 0
-                """
-                params = []
-                if project:
-                    query += " AND project_name = ?"
-                    params.append(project)
-                if search:
-                    query += " AND (title LIKE ? OR content LIKE ? OR tags LIKE ?)"
-                    term = f"%{search}%"
-                    params.extend([term, term, term])
-                query += " ORDER BY created_at DESC;"
-
-                for r in conn.execute(query, params).fetchall():
-                    memories.append({
-                        "id": str(r["id"]),
-                        "project_name": str(r["project_name"]),
-                        "title": str(r["title"]),
-                        "content": str(r["content"]),
-                        "tags": str(r["tags"] or ""),
-                        "created_at": str(r["created_at"]),
-                        "importance": int(r["importance"]),
-                    })
-        except Exception as exc:
-            logger.error("Error fetching work memories: %s", exc)
-        return memories
+        """Fetch records from work_memory.db via WorkMemoryManager."""
+        items = self.work_memory.get_all_memories(project_name=project, search=search)
+        return [
+            {
+                "id": m.id,
+                "project_name": m.project_name,
+                "title": m.title,
+                "content": m.content,
+                "tags": ", ".join(m.tags) if isinstance(m.tags, list) else str(m.tags or ""),
+                "created_at": m.created_at,
+                "importance": m.importance,
+                "source_conversation_id": m.source_conversation_id,
+            }
+            for m in items
+        ]
 
     def add_work_memory(
-        self, title: str, content: str, project_name: str = "default", tags: str = "", importance: int = 1
+        self,
+        title: str,
+        content: str,
+        project_name: str = "default",
+        tags: str = "",
+        importance: int = 1,
+        source_conversation_id: Optional[str] = None,
     ) -> str:
         """Add a persistent record to Work Memory."""
-        mem_id = f"wm_{uuid.uuid4().hex[:10]}"
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-        with self.db.session("work_memory") as conn:
-            conn.execute(
-                """
-                INSERT INTO work_memories (id, project_name, title, content, tags, importance, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                (mem_id, project_name, title, content, tags, importance, now, now),
-            )
-
+        tags_list = [t.strip() for t in tags.split(",") if t.strip()] if isinstance(tags, str) else (tags or [])
+        mem_id, is_new = self.work_memory.add_memory(
+            title=title,
+            content=content,
+            project_name=project_name,
+            tags=tags_list,
+            importance=importance,
+            source_conversation_id=source_conversation_id,
+        )
         self.events.memory_domain_updated.emit("work")
-        logger.info("Added Work Memory: %s ('%s' under '%s')", mem_id, title, project_name)
         return mem_id
+
+    def update_work_memory(
+        self,
+        memory_id: str,
+        title: Optional[str] = None,
+        content: Optional[str] = None,
+        project_name: Optional[str] = None,
+        tags: Optional[str] = None,
+        importance: Optional[int] = None,
+    ) -> bool:
+        """Update an existing work memory record."""
+        tags_list = [t.strip() for t in tags.split(",") if t.strip()] if isinstance(tags, str) else None
+        updated = self.work_memory.update_memory(
+            memory_id=memory_id,
+            title=title,
+            content=content,
+            project_name=project_name,
+            tags=tags_list,
+            importance=importance,
+        )
+        if updated:
+            self.events.memory_domain_updated.emit("work")
+        return updated
 
     def delete_work_memory(self, memory_id: str) -> None:
         """Delete an individual record from Work Memory."""
-        with self.db.session("work_memory") as conn:
-            conn.execute("DELETE FROM work_memories WHERE id = ?;", (memory_id,))
-
+        self.work_memory.delete_memory(memory_id)
         self.events.memory_domain_updated.emit("work")
-        logger.info("Deleted Work Memory record: %s", memory_id)
 
     def clear_work_memory(self) -> None:
         """Clear Work Memory completely (never touches Personal Memory)."""
+        self.work_memory.clear_domain()
+        self.events.memory_domain_updated.emit("work")
+
+    def get_work_projects(self) -> list[str]:
+        """Fetch all unique project names from Work Memory."""
+        return self.work_memory.get_projects()
+
+    # --------------------------------------------------------------------------
+    # Memory Proposal Workflow Operations
+    # --------------------------------------------------------------------------
+
+    def get_pending_proposals(self) -> list[dict]:
+        """Fetch all memory proposals awaiting user approval."""
+        proposals = self.proposal_manager.get_pending_proposals()
+        return [p.model_dump() for p in proposals]
+
+    def approve_proposal(
+        self,
+        proposal_id: str,
+        title: Optional[str] = None,
+        content: Optional[str] = None,
+        category: Optional[str] = None,
+        project_name: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        importance: int = 2,
+    ) -> tuple[bool, Optional[str]]:
+        """Approve a memory proposal, persisting it to Personal or Work memory."""
+        success, mem_id = self.proposal_manager.approve_proposal(
+            proposal_id=proposal_id,
+            title=title,
+            content=content,
+            category=category,
+            project_name=project_name,
+            tags=tags,
+            importance=importance,
+        )
+        if success:
+            prop = self.proposal_manager.get_proposal(proposal_id)
+            if prop:
+                self.events.memory_domain_updated.emit(prop.domain.value)
+        return success, mem_id
+
+    def reject_proposal(self, proposal_id: str) -> bool:
+        """Reject a memory proposal, discarding it without saving."""
+        success = self.proposal_manager.reject_proposal(proposal_id)
+        if success:
+            self.events.memory_domain_updated.emit("proposals")
+        return success
+
+    # --------------------------------------------------------------------------
+    # Memory Export, Backup & Restore
+    # --------------------------------------------------------------------------
+
+    def export_memory_domain(self, domain: str, file_path: Path, encrypt: bool = False) -> Path:
+        """Export a domain (personal or work) to a backup file."""
+        if domain == "personal":
+            return self.personal_memory.export_bundle(file_path, encrypt=encrypt)
+        elif domain == "work":
+            return self.work_memory.export_bundle(file_path, encrypt=encrypt)
+        raise ValueError(f"Unknown domain for export: {domain}")
+
+    def restore_memory_domain(self, domain: str, file_path: Path, is_encrypted: bool = False) -> int:
+        """Restore a domain (personal or work) from a backup bundle."""
+        if domain == "personal":
+            count = self.personal_memory.restore_bundle(file_path, is_encrypted=is_encrypted)
+            self.events.memory_domain_updated.emit("personal")
+            return count
+        elif domain == "work":
+            count = self.work_memory.restore_bundle(file_path, is_encrypted=is_encrypted)
+            self.events.memory_domain_updated.emit("work")
+            return count
+        raise ValueError(f"Unknown domain for restore: {domain}")
         self.db.clear_domain("work_memory")
         self.events.memory_domain_updated.emit("work")
 
@@ -496,6 +614,87 @@ class AppController:
         self.events.voice_mute_toggled.emit(self._is_mic_muted)
         logger.info("Microphone mute set to: %s", self._is_mic_muted)
         return self._is_mic_muted
+
+    # --------------------------------------------------------------------------
+    # Storage Architecture & Persistence Management
+    # --------------------------------------------------------------------------
+
+    def get_storage_path(self) -> Path:
+        """Return current persistent data directory."""
+        return self.config.paths.data_dir
+
+    def migrate_storage(self, new_path: Path, overwrite_approved: bool = False) -> tuple[bool, str]:
+        """Safely migrate data directory to a new location."""
+        success, msg = self.migration_service.migrate_data_directory(new_path, overwrite_approved=overwrite_approved)
+        if success:
+            # Re-initialize memory managers pointing to the new location
+            self.personal_memory = PersonalMemoryManager(self.config, self.db)
+            self.work_memory = WorkMemoryManager(self.config, self.db)
+            self.proposal_manager = MemoryProposalManager(
+                self.config, self.db, self.personal_memory, self.work_memory
+            )
+            self.context_builder = MemoryContextBuilder(self.personal_memory, self.work_memory)
+            self.backup_manager = BackupManager(self.config, self.db, self.personal_memory.encryption)
+            self.set_setting("storage_data_directory", str(new_path))
+            self.events.memory_domain_updated.emit("all")
+        return success, msg
+
+    def backup_domain(self, domain: str, encrypt: bool = True) -> Path:
+        """Create an independent backup for a domain."""
+        return self.backup_manager.backup_domain(domain, encrypt=encrypt)
+
+    def restore_domain(self, backup_path: Path, domain: str) -> bool:
+        """Restore an independent domain from backup."""
+        success = self.backup_manager.restore_domain(backup_path, domain)
+        if success:
+            if domain == "personal_memory":
+                self.personal_memory = PersonalMemoryManager(self.config, self.db)
+                self.events.memory_domain_updated.emit("personal")
+            elif domain == "work_memory":
+                self.work_memory = WorkMemoryManager(self.config, self.db)
+                self.events.memory_domain_updated.emit("work")
+            elif domain == "conversations":
+                self.events.conversation_created.emit("restored")
+        return success
+
+    def export_domain(self, domain: str, export_format: str, output_path: Path) -> Path:
+        """Export domain data to Markdown, JSON, or CSV."""
+        fmt = export_format.lower()
+        if fmt in ("markdown", "md"):
+            return self.backup_manager.export_domain_markdown(domain, output_path)
+        elif fmt == "csv":
+            return self.backup_manager.export_domain_csv(domain, output_path)
+        else:
+            return self.backup_manager.export_domain_json(domain, output_path, decrypt=True)
+
+    def wipe_domain(self, domain: str, confirm_phrase: str) -> bool:
+        """Securely wipe an individual domain with confirmation guard."""
+        success = self.backup_manager.wipe_domain(domain, confirm_phrase)
+        if success:
+            if domain == "personal_memory":
+                self.personal_memory.vector_index.clear()
+                self.events.memory_domain_updated.emit("personal")
+            elif domain == "work_memory":
+                self.work_memory.vector_index.clear()
+                self.events.memory_domain_updated.emit("work")
+        return success
+
+    def sync_vector_indexes(self) -> dict[str, Any]:
+        """Perform self-healing vector index synchronization across memory domains."""
+        p_sync = self.personal_memory.sync_vector_index()
+        w_sync = self.work_memory.sync_vector_index()
+        return {
+            "personal": p_sync,
+            "work": w_sync,
+        }
+
+    def get_recovery_key(self) -> str:
+        """Export master memory recovery key."""
+        return self.personal_memory.encryption.export_recovery_key()
+
+    def recover_encryption_key(self, recovery_key: str) -> bool:
+        """Restore master memory encryption cipher using recovery key."""
+        return self.personal_memory.encryption.recover_with_recovery_key(recovery_key)
 
 
 _controller_instance: Optional[AppController] = None

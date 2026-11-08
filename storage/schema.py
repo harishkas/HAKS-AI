@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS personal_memories (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     importance INTEGER DEFAULT 1,
-    is_archived INTEGER DEFAULT 0
+    is_archived INTEGER DEFAULT 0,
+    source_conversation_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_personal_memories_category ON personal_memories(category);
@@ -37,7 +38,8 @@ CREATE TABLE IF NOT EXISTS work_memories (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     importance INTEGER DEFAULT 1,
-    is_archived INTEGER DEFAULT 0
+    is_archived INTEGER DEFAULT 0,
+    source_conversation_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_work_memories_project ON work_memories(project_name);
@@ -77,6 +79,7 @@ CREATE TABLE IF NOT EXISTS memory_proposals (
     domain TEXT NOT NULL CHECK(domain IN ('personal', 'work')),
     source_conversation_id TEXT,
     proposal_text TEXT NOT NULL,
+    suggested_title TEXT,
     suggested_category TEXT,
     suggested_tags TEXT,
     confidence REAL DEFAULT 0.0,

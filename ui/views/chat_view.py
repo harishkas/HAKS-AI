@@ -146,6 +146,31 @@ class ChatView(QWidget):
         input_layout.setContentsMargins(8, 8, 8, 8)
         input_layout.setSpacing(8)
 
+        # Memory Proposal Notification Banner (AI suggests; user approves)
+        self.proposal_notification = QFrame()
+        self.proposal_notification.setStyleSheet(
+            "background-color: #1a2332; border: 1px solid #388bfd; border-radius: 6px; padding: 6px 10px;"
+        )
+        prop_notif_layout = QHBoxLayout(self.proposal_notification)
+        prop_notif_layout.setContentsMargins(4, 2, 4, 2)
+        self.lbl_prop_notif = QLabel("💡 New memory candidate detected awaiting your approval.")
+        self.lbl_prop_notif.setStyleSheet("color: #58a6ff; font-size: 11px; font-weight: 600;")
+        self.btn_review_prop = QPushButton("Review in Memory")
+        self.btn_review_prop.setProperty("class", "btn_primary")
+        self.btn_review_prop.setFixedHeight(26)
+        self.btn_review_prop.clicked.connect(self._on_review_proposal_clicked)
+
+        self.btn_dismiss_prop = QPushButton("✕")
+        self.btn_dismiss_prop.setProperty("class", "btn_secondary")
+        self.btn_dismiss_prop.setFixedSize(26, 26)
+        self.btn_dismiss_prop.clicked.connect(lambda: self.proposal_notification.setVisible(False))
+
+        prop_notif_layout.addWidget(self.lbl_prop_notif, stretch=1)
+        prop_notif_layout.addWidget(self.btn_review_prop)
+        prop_notif_layout.addWidget(self.btn_dismiss_prop)
+        input_layout.addWidget(self.proposal_notification)
+        self.proposal_notification.setVisible(False)
+
         # Multiline text input
         self.text_input = ChatInputEdit(self._on_send_message)
         input_layout.addWidget(self.text_input)
@@ -198,6 +223,21 @@ class ChatView(QWidget):
         self.controller.events.conversation_loaded.connect(self._on_conversation_loaded)
         self.controller.events.voice_mute_toggled.connect(self._on_voice_mute_toggled)
         self.controller.events.ai_engine_changed.connect(self._on_ai_engine_event)
+        self.controller.events.memory_proposal_created.connect(self._on_memory_proposal_created)
+
+    def _on_memory_proposal_created(self, prop_data: dict) -> None:
+        """Surface proposal banner when an automatic memory proposal is detected."""
+        domain = prop_data.get("domain", "personal")
+        snippet = prop_data.get("proposal_text", "")[:45] + "..."
+        self.lbl_prop_notif.setText(f"💡 Detected {domain.capitalize()} Memory candidate: \"{snippet}\"")
+        self._last_proposal_domain = domain
+        self.proposal_notification.setVisible(True)
+
+    def _on_review_proposal_clicked(self) -> None:
+        """Navigate user to the appropriate memory view for review."""
+        target_page = "personal_memory" if getattr(self, "_last_proposal_domain", "personal") == "personal" else "work_memory"
+        self.proposal_notification.setVisible(False)
+        self.controller.events.navigate_to_page.emit(target_page)
 
     def _get_current_engine_type(self) -> str:
         """Return 'local' or 'cloud'."""
@@ -412,6 +452,22 @@ class ChatView(QWidget):
 
         # Prepare typed AIMessage context (conversations only, privacy preserved)
         messages = self.controller.get_conversation_ai_messages(limit=20)
+
+        # Inject only approved relevant memory context if semantically matched
+        if self._last_user_prompt:
+            try:
+                mem_context = self.controller.context_builder.build_context(
+                    query=self._last_user_prompt,
+                    include_personal=True,
+                    include_work=True,
+                    top_k_per_domain=2,
+                    min_relevance=0.25,
+                )
+                if mem_context:
+                    from ai.models import AIMessage
+                    messages.insert(0, AIMessage(role="system", content=mem_context))
+            except Exception as mem_exc:
+                logger.warning("Could not inject memory context: %s", mem_exc)
 
         # Launch background worker thread
         self._worker = AIInferenceWorker(

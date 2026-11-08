@@ -21,10 +21,11 @@ def qapp():
     if app is None:
         app = QApplication(sys.argv)
     yield app
-    try:
-        app.processEvents()
-    except Exception:
-        pass
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Ensure clean process exit on Windows Python 3.14 without C++ static destructor abort."""
+    os._exit(exitstatus)
 
 
 @pytest.fixture

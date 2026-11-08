@@ -15,33 +15,76 @@ from dotenv import load_dotenv
 # Load optional .env file if present
 load_dotenv()
 
-# Project root directory
+# Project root directory (contains source code and bundled assets)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Persistent Windows storage root outside source code and .venv
+def get_default_persistent_root() -> Path:
+    """Resolve persistent OS-level root directory for HAKS."""
+    override = os.getenv("HAKS_ROOT_DIR")
+    if override:
+        return Path(override)
+    local_app_data = os.getenv("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "HAKS"
+    return Path.home() / "AppData" / "Local" / "HAKS"
+
+
+def get_default_data_dir() -> Path:
+    """Resolve persistent data directory (%LOCALAPPDATA%\\HAKS\\data)."""
+    override = os.getenv("HAKS_DATA_DIR")
+    if override:
+        return Path(override)
+    return get_default_persistent_root() / "data"
+
+
+def get_default_logs_dir() -> Path:
+    """Resolve persistent logs directory (%LOCALAPPDATA%\\HAKS\\logs)."""
+    override = os.getenv("HAKS_LOGS_DIR")
+    if override:
+        return Path(override)
+    return get_default_persistent_root() / "logs"
 
 
 class SystemPaths(BaseModel):
-    """Filesystem paths used by HAKS."""
+    """Filesystem paths used by HAKS with persistent OS-level defaults."""
 
-    root_dir: Path = Field(default_factory=lambda: PROJECT_ROOT)
-    data_dir: Path = Field(default_factory=lambda: PROJECT_ROOT / "data")
-    logs_dir: Path = Field(default_factory=lambda: PROJECT_ROOT / "logs")
+    root_dir: Path = Field(default_factory=get_default_persistent_root)
+    data_dir: Path = Field(default_factory=get_default_data_dir)
+    logs_dir: Path = Field(default_factory=get_default_logs_dir)
     assets_dir: Path = Field(default_factory=lambda: PROJECT_ROOT / "assets")
-    backups_dir: Path = Field(default_factory=lambda: PROJECT_ROOT / "data" / "backups")
+    backups_dir: Path = Field(default_factory=lambda: get_default_data_dir() / "backups")
 
     def ensure_directories(self) -> None:
-        """Create required directories if they do not exist."""
+        """Create required directories and 9 independent storage domains if they do not exist."""
+        # Core base directories
         for path in (self.data_dir, self.logs_dir, self.assets_dir, self.backups_dir):
             path.mkdir(parents=True, exist_ok=True)
 
+        # 9 Independent Storage Domains
+        domains = [
+            self.data_dir / "personal_memory",
+            self.data_dir / "personal_memory" / "vector_index",
+            self.data_dir / "work_memory",
+            self.data_dir / "work_memory" / "vector_index",
+            self.data_dir / "conversations",
+            self.data_dir / "memory_proposals",
+            self.data_dir / "settings",
+            self.data_dir / "backups",
+            self.logs_dir,
+        ]
+        for d in domains:
+            d.mkdir(parents=True, exist_ok=True)
+
 
 class DatabaseConfig(BaseModel):
-    """SQLite Database framework configuration."""
+    """SQLite Database framework configuration with domain-isolated database files."""
 
-    personal_memory_file: str = "personal_memory.db"
-    work_memory_file: str = "work_memory.db"
-    conversations_file: str = "conversations.db"
-    memory_proposals_file: str = "memory_proposals.db"
-    settings_file: str = "settings.db"
+    personal_memory_file: str = "personal_memory/personal_memory.db"
+    work_memory_file: str = "work_memory/work_memory.db"
+    conversations_file: str = "conversations/conversations.db"
+    memory_proposals_file: str = "memory_proposals/memory_proposals.db"
+    settings_file: str = "settings/settings.db"
     enable_wal: bool = True
     busy_timeout_ms: int = 5000
     enable_foreign_keys: bool = True
