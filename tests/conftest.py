@@ -22,6 +22,7 @@ def qapp():
     if app is None:
         app = QApplication(sys.argv)
     yield app
+    app.processEvents()
 
 
 @pytest.fixture
@@ -50,4 +51,7 @@ def test_db_manager(temp_workspace: AppConfig) -> DatabaseManager:
 @pytest.fixture
 def controller(temp_workspace: AppConfig, test_db_manager: DatabaseManager) -> AppController:
     """Fixture providing an isolated AppController."""
-    return AppController(config=temp_workspace, db_manager=test_db_manager)
+    ctrl = AppController(config=temp_workspace, db_manager=test_db_manager)
+    yield ctrl
+    if hasattr(ctrl, "voice_engine") and ctrl.voice_engine:
+        ctrl.voice_engine.shutdown()

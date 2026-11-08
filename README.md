@@ -41,11 +41,23 @@ HAKS uses a **Modular Monolithic Architecture** with strict layer separation:
    - `CredentialManager`: Secure OS-level key storage using Windows Credential Manager.
    - `AIEngineManager`: Central lifecycle coordinator managing engine selection, streaming, health monitoring, and cancellation.
    - `AIInferenceWorker`: Non-blocking background `QThread` ensuring the Qt GUI maintains 60fps responsiveness during generation.
-4. **Memory, Voice & Security Layer (`storage/`)**:
+4. **Intelligent AI Routing & Privacy Layer (`routing/`)**:
+   - `HybridAIRouter`: Multi-factor deterministic classifier evaluating sensitivity, complexity, network availability, and user preferences.
+   - `DataRedactor`: Regular expression and Shannon entropy scanner masking API keys, emails, IPs, and payment credentials.
+   - `ConsentManager`: Transparent user approval workflow for routing private content to cloud AI.
+5. **Continuous Voice Architecture (`voice/`)**:
+   - `AudioCaptureService`: Real-time microphone capture via `sounddevice` with RMS level monitoring, hardware enumeration, and mute.
+   - `VoiceActivityDetector`: Dynamic noise-floor tracking VAD with pre-speech padding and silence timeout.
+   - `WakeWordDetector`: Dual-engine wake detector for "Hey HAKS" with offline local acoustic burst/fricative analysis and optional Picovoice Porcupine custom keyword support.
+   - `FasterWhisperSTT`: Quantized CPU int8 bilingual speech recognition (Tamil, English, Mixed) with lazy loading and prompt conditioning.
+   - `LanguageAwareTTSRouter`: Script-aware text-to-speech router directing Tamil to high-fidelity Edge Neural voices (`ta-IN-PallaviNeural`, `ta-IN-ValluvarNeural`) and English to Edge or offline Windows SAPI (`pyttsx3`).
+   - `AudioPlayerService`: Sub-50ms latency barge-in audio playback decoded via PyAV with instant stop on user interruption.
+   - `ContinuousVoiceEngine`: Central state machine (`STANDBY` -> `WAKE_DETECTED` -> `LISTENING` -> `PROCESSING` -> `THINKING` -> `SPEAKING` -> `INTERRUPTED`) with built-in voice commands in English and Tamil.
+6. **Memory & Security Layer (`memory/`, `storage/`)**:
    - **Personal Memory**: Personal history, goals, preferences, and moments stored in `personal_memory.db`.
    - **Work Memory**: Technical discussions, projects, architecture, and code context in `work_memory.db`.
-   - **Privacy Boundary**: Memory databases are strictly kept local and are NEVER transmitted to cloud AI engines. Only current conversation messages explicitly selected by the user are sent.
-5. **Infrastructure & Storage**: 5 independent SQLite databases operating in WAL mode with foreign-key enforcement.
+   - **Privacy Boundary**: Memory databases are strictly kept local, encrypted at rest via AES-256 (Fernet + PBKDF2), and NEVER transmitted to cloud AI engines.
+7. **Infrastructure & Storage**: 5 independent SQLite databases operating in WAL mode with foreign-key enforcement.
 
 ---
 
@@ -100,6 +112,40 @@ HAKS/
 │   ├── work_memory.py                 # Work Memory domain manager (work_memory.db)
 │   └── context_builder.py             # Minimal disclosure relevant memory prompt injector
 │
+├── routing/                            # Phase 5 Intelligent Routing & Privacy
+│   ├── __init__.py                    # Public routing exports
+│   ├── models.py                      # PrivacyLevel, ComplexityLevel, RoutingDecision, ConsentRequest
+│   ├── privacy_classifier.py          # Deterministic regex, entropy & keyword privacy classifier
+│   ├── complexity_analyzer.py         # Multi-factor token, linguistic & AST complexity evaluator
+│   ├── router.py                      # HybridAIRouter selecting Local vs Cloud engines
+│   ├── consent_manager.py             # User consent tracking & temporary cloud authorization
+│   ├── data_redactor.py               # Masking of PII, API tokens, IP addresses, credentials
+│   └── exceptions.py                  # Structured routing error classes
+│
+├── voice/                              # Phase 6 Continuous Voice Architecture
+│   ├── __init__.py                    # Public voice exports
+│   ├── models.py                      # VoiceState, VoiceCommandType, AudioDevice, TranscriptionResult, SpokenUtterance
+│   ├── audio_capture.py               # Real-time sounddevice microphone capture, RMS VU level, mute
+│   ├── vad.py                         # Voice Activity Detector with dynamic noise tracking & pre-speech padding
+│   ├── player.py                      # PyAV audio decoding & sounddevice output with sub-50ms barge-in stop
+│   ├── conversation_engine.py         # Continuous state machine, bilingual commands, AI & memory integration
+│   ├── wake_word/                     # Wake word detectors ("Hey HAKS")
+│   │   ├── __init__.py
+│   │   ├── base.py                    # WakeWordDetectorInterface
+│   │   ├── local_detector.py          # Offline acoustic energy burst & fricative /s/ detector
+│   │   └── porcupine_detector.py      # Picovoice Porcupine adapter with custom keyword support
+│   ├── stt/                           # Speech-to-Text
+│   │   ├── __init__.py
+│   │   ├── base.py                    # SpeechToTextInterface
+│   │   └── faster_whisper_stt.py      # CPU int8 Faster-Whisper with Tamil/English auto-detection & lazy loading
+│   └── tts/                           # Text-to-Speech
+│       ├── __init__.py
+│       ├── base.py                    # TextToSpeechInterface
+│       ├── edge_tts_engine.py         # Edge Neural Tamil (Pallavi/Valluvar) & English (Neerja/Jenny)
+│       ├── sapi_tts_engine.py         # Offline Windows SAPI engine (pyttsx3)
+│       ├── piper_tts_engine.py        # Local ONNX Piper TTS adapter
+│       └── router.py                  # LanguageAwareTTSRouter (Unicode Tamil vs English script)
+│
 ├── storage/                           # SQLite database & persistence framework
 │   ├── __init__.py
 │   ├── database.py                    # Connection management, WAL mode, transaction sessions
@@ -123,7 +169,7 @@ HAKS/
 │       ├── voice_view.py              # Voice pipeline state visualizer
 │       └── settings_view.py           # Application settings, storage migration, backups & themes
 │
-├── tests/                             # Automated test suite (87 tests)
+├── tests/                             # Automated test suite (126 tests)
 │   ├── __init__.py
 │   ├── conftest.py                    # Pytest fixtures (headless Qt & isolated storage)
 │   ├── test_config.py                 # Configuration tests
@@ -143,7 +189,9 @@ HAKS/
 │   ├── test_memory_proposal_detector.py # Automatic pattern detection & scoring tests
 │   ├── test_memory_proposal_workflow.py # Approval/rejection workflow & minimal context builder tests
 │   ├── test_personal_and_work_memory_managers.py # CRUD, domain isolation, encrypted backup/restore tests
-│   └── test_storage_architecture.py   # Persistent OS storage, domain exports, wiping, migration tests
+│   ├── test_storage_architecture.py   # Persistent OS storage, domain exports, wiping, migration tests
+│   ├── test_privacy_and_routing.py    # Phase 5 hybrid router, classifiers, consent & redactor tests
+│   └── test_voice_architecture.py     # Phase 6 VAD, wake word, Faster-Whisper, TTS router, & continuous engine tests
 │
 ├── logs/                              # Application log files (git-ignored)
 └── data/                              # SQLite databases (git-ignored)
@@ -243,13 +291,13 @@ cd "c:\Users\Admin\Music\HAKS AI"
 pip install -r requirements.txt
 ```
 
-### 3. Running the Test Suite (87 Tests)
+### 3. Running the Test Suite (126 Tests)
 ```powershell
 .\.venv\Scripts\pytest.exe
 ```
 Output:
 ```
-============================= 87 passed in 12.24s =============================
+============================= 126 passed in 19.55s =============================
 ```
 
 ### 4. Running the Smoke Test
@@ -264,6 +312,29 @@ Output:
 
 ---
 
+## Continuous Voice Assistant & Voice Controls
+
+HAKS includes a bilingual, continuous voice assistant pipeline with full barge-in interruption capability.
+
+### Voice State Flow
+```
+[STANDBY] ──("Hey HAKS" or Push-to-Talk)──> [WAKE_DETECTED] ──> [LISTENING] ──(VAD Speech End)──> [PROCESSING] ──(Faster-Whisper STT)──> [THINKING] ──(AI & Memory)──> [SPEAKING] ──(Natural End)──> [LISTENING] (Continuous Mode)
+                                                                                                                          │
+                                                                                                    (User Interrupts) ────┴──> [INTERRUPTED] ──> [LISTENING]
+```
+
+### Voice Commands (English & Tamil)
+| Command | Tamil Equivalent | Action |
+|---|---|---|
+| **"Stop HAKS"** / **"Stop"** | **"நிறுத்து"** / **"நில்"** | Stops current conversation and enters STANDBY. |
+| **"Sleep HAKS"** | **"தூங்கு"** / **"ஓய்வெடு"** | Enters low-power SLEEP state. |
+| **"Wake up HAKS"** | **"எழுந்திரு"** / **"விழி"** | Wakes assistant from SLEEP to STANDBY. |
+| **"Cancel"** | **"ரத்து செய்"** / **"வேண்டாம்"** | Aborts current voice turn immediately. |
+| **"Repeat"** | **"மீண்டும் சொல்"** / **"மறுபடியும் சொல்"** | Re-synthesizes and plays the last response. |
+| **"Stop speaking"** | **"பேசாதே"** / **"பேசுவதை நிறுத்து"** | Instantly silences audio playback and listens. |
+
+---
+
 ## Troubleshooting Guide
 
 | Issue | Cause | Resolution |
@@ -274,6 +345,7 @@ Output:
 | **Cloud AI: Authentication failed (HTTP 400/401/403)** | API key is invalid, revoked, or expired. | Check your API key in Google AI Studio or OpenAI dashboard and re-enter. |
 | **System sluggishness during inference** | Too large a model was loaded in Ollama. | In HAKS AI Engine view, click "Unload Active Model" and switch to `llama3.2:1b`. |
 | **Headless Qt test error (`qt.qpa.plugin`)** | PySide6 cannot find a display. | Set environment variable: `$env:QT_QPA_PLATFORM="offscreen"`. (Handled automatically in `tests/conftest.py`). |
+| **Microphone not detected** | Microphone permissions or default input device disconnected. | Open HAKS UI -> Voice -> select device from "Audio Input Device" dropdown. |
 
 ---
 
@@ -283,8 +355,8 @@ Output:
 - [x] **Phase 2 — Desktop UI** (Unified AppController, ChatView, Floating Assistant, History, Themes)
 - [x] **Phase 3 — AI Engine Integration** (Ollama Local AI, Cloud AI Provider Adapter, Non-Blocking Streaming, Windows Credential Manager, Cancellation)
 - [x] **Phase 4 — Memory Architecture** (Dual isolated memory domains, local vector search, proposal approval workflow, encryption at rest, backup/restore/export, safe storage migration)
-- [ ] **Phase 5 — Intelligent AI Routing & Privacy Management** (Hybrid rule + lightweight classifier, deterministic privacy policies, consent manager, data redactor, fallback confirmation)
-- [ ] **Phase 6 — Voice Pipeline** (Silero VAD, Tamil/English STT/TTS, wake-word "Hey HAKS")
+- [x] **Phase 5 — Intelligent AI Routing & Privacy Management** (Hybrid rule + lightweight classifier, deterministic privacy policies, consent manager, data redactor, fallback confirmation)
+- [x] **Phase 6 — Advanced Bilingual Voice Assistant** (Real-time sounddevice capture, dynamic VAD, "Hey HAKS" wake word, Faster-Whisper CPU int8 STT, multi-engine Edge/SAPI TTS router, barge-in interruption, continuous state machine)
 - [ ] **Phase 7 — Windows Computer Control & Security** (OS actions, 4-tier risk classification, audit logs)
 - [ ] **Phase 8 — Offline & Disaster Recovery** (Automated backups, integrity validation)
 - [ ] **Phase 9 — Packaging & Release 0.1** (PyInstaller packaging, final verification)

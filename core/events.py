@@ -32,6 +32,13 @@ class ApplicationEvents(QObject):
     voice_state_changed = Signal(str)  # STANDBY, LISTENING, THINKING, etc.
     voice_transcript_received = Signal(str, str)  # (text, language)
     voice_mute_toggled = Signal(bool)  # is_muted
+    voice_audio_level_updated = Signal(float)  # 0.0 to 1.0 live mic VU meter
+    voice_speech_started = Signal()
+    voice_speech_ended = Signal()
+    voice_speaking_started = Signal(str)  # text being spoken
+    voice_speaking_finished = Signal()
+    voice_interrupted = Signal()  # barge-in event
+    voice_error_occurred = Signal(str)  # voice error message
 
     # AI engine lifecycle signals
     ai_generation_started = Signal(str)  # prompt/query

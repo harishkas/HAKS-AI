@@ -89,9 +89,29 @@ def main() -> int:
         logger.info("Local engine caps: streaming=%s, is_local=%s", local_caps.streaming, local_caps.is_local)
         logger.info("Cloud engine caps: streaming=%s, is_local=%s", cloud_caps.streaming, cloud_caps.is_local)
 
+        # 5. Test Phase 5 Privacy & Intelligent Routing Subsystems
+        router = controller.get_router()
+        sens_dec = router.route("API key sk-1234567890abcdef1234567890abcdef test")
+        assert sens_dec.selected_engine == "local"
+        logger.info("Phase 5 Privacy Guard verified: sensitive prompt forced to Local AI.")
+
+        redacted = controller.redactor.redact("Contact me at user@example.com with key sk-1234567890abcdef1234567890abcdef")
+        assert redacted.has_redactions is True
+        logger.info("Phase 5 Data Redactor verified: masked %d sensitive items.", redacted.redactions_count)
+
+        # 6. Test Phase 6 Voice Assistant Subsystems
+        from voice.models import VoiceCommandType
+        assert controller.get_voice_state() == "STOPPED"
+        assert controller.voice_engine._parse_voice_command("Stop HAKS") == VoiceCommandType.STOP
+        assert controller.voice_engine._parse_voice_command("நிறுத்து") == VoiceCommandType.STOP
+        assert controller.voice_engine.tts.detect_language("வணக்கம் உலகம்") == "ta"
+        assert controller.voice_engine.tts.detect_language("Hello HAKS") == "en"
+        logger.info("Phase 6 Voice Assistant verified: state machine, bilingual commands, and TTS routing active.")
+
+        controller.voice_engine.shutdown()
         win.close()
         floating.close()
-        logger.info("Phase 3 Smoke test passed successfully!")
+        logger.info("Phase 6 Smoke test passed successfully!")
         return 0
 
     # Normal execution

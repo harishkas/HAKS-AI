@@ -7,7 +7,7 @@ Supports environment overrides, persistent defaults, and path resolution.
 from functools import lru_cache
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -137,13 +137,28 @@ class VoiceConfig(BaseModel):
     """Voice pipeline configuration."""
 
     wake_phrase: str = "Hey HAKS"
+    wake_word_engine: Literal["local", "porcupine"] = "local"
+    porcupine_access_key: str = Field(default_factory=lambda: os.getenv("HAKS_PORCUPINE_ACCESS_KEY", ""))
+    porcupine_keyword_path: str = Field(default_factory=lambda: os.getenv("HAKS_PORCUPINE_KEYWORD_PATH", ""))
+    wake_sensitivity: float = 0.65
     supported_languages: list[str] = Field(
         default_factory=lambda: ["ta", "en"]
     )
     preferred_language: Literal["ta", "en", "mixed"] = "mixed"
     continuous_mode: bool = True
     input_sample_rate: int = 16000
+    input_device_index: Optional[int] = None
+    output_device_index: Optional[int] = None
     vad_threshold: float = 0.5
+    silence_timeout_ms: int = 1200
+    conversation_timeout_seconds: int = 45
+    whisper_model_size: Literal["tiny", "base", "small"] = "base"
+    tts_engine: Literal["edge", "sapi", "piper", "auto"] = "auto"
+    tts_tamil_voice: str = "ta-IN-PallaviNeural"
+    tts_english_voice: str = "en-IN-NeerjaNeural"
+    speech_speed: float = 1.0
+    speech_volume: float = 1.0
+    enable_barge_in: bool = True
 
 
 class SecurityConfig(BaseModel):
@@ -166,6 +181,9 @@ class AppConfig(BaseModel):
     ai: AIConfig = Field(default_factory=AIConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+
+
+AppConfig.model_rebuild()
 
 
 @lru_cache(maxsize=1)

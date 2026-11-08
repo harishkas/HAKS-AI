@@ -165,6 +165,8 @@ class FloatingAssistant(QWidget):
         """Connect to application events."""
         self.controller.events.voice_state_changed.connect(self._update_voice_status)
         self.controller.events.voice_mute_toggled.connect(self._update_mic_status)
+        self.controller.events.voice_transcript_received.connect(self._on_voice_transcript)
+        self.controller.events.voice_speaking_started.connect(self._on_voice_speaking)
         self.controller.events.message_received.connect(self._on_message_received)
         self.controller.events.show_floating_requested.connect(self._on_show_requested)
 
@@ -366,6 +368,14 @@ class FloatingAssistant(QWidget):
         prefix = "You" if role == "user" else "HAKS"
         clean_text = content[:90] + ("..." if len(content) > 90 else "")
         self.lbl_response_preview.setText(f"<b>{prefix}:</b> {clean_text}")
+
+    def _on_voice_transcript(self, text: str, lang: str) -> None:
+        clean = text[:90] + ("..." if len(text) > 90 else "")
+        self.lbl_response_preview.setText(f"<b>You:</b> <span style='color:#58a6ff;'>[{lang.upper()}]</span> {clean}")
+
+    def _on_voice_speaking(self, text: str) -> None:
+        clean = text[:90] + ("..." if len(text) > 90 else "")
+        self.lbl_response_preview.setText(f"<b>HAKS:</b> 🔊 {clean}")
 
     def _on_mic_clicked(self) -> None:
         self.controller.toggle_mic_mute()

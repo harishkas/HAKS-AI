@@ -72,6 +72,10 @@ class AppController:
         self.consent_manager = get_consent_manager()
         self._router: Optional[Any] = None
 
+        # Phase 6 Advanced Voice Assistant Engine
+        from voice.conversation_engine import ContinuousVoiceEngine
+        self.voice_engine = ContinuousVoiceEngine(controller=self, config=self.config)
+
         logger.info("AppController initialized. Current theme: %s", self._current_theme)
 
     # --------------------------------------------------------------------------
@@ -649,24 +653,58 @@ class AppController:
 
     def get_voice_state(self) -> str:
         """Return current voice pipeline state."""
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            return self.voice_engine.state.value
         return self._voice_state
 
     def set_voice_state(self, state: str) -> None:
         """Update and broadcast voice state."""
         self._voice_state = state
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            try:
+                from voice.models import VoiceState
+                self.voice_engine._set_state(VoiceState(state))
+            except Exception:
+                pass
         self.events.voice_state_changed.emit(state)
         logger.info("Voice state changed to: %s", state)
 
     def is_mic_muted(self) -> bool:
         """Return microphone mute status."""
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            return self.voice_engine.audio_capture.is_muted
         return self._is_mic_muted
 
     def toggle_mic_mute(self) -> bool:
         """Toggle microphone mute and emit state."""
-        self._is_mic_muted = not self._is_mic_muted
-        self.events.voice_mute_toggled.emit(self._is_mic_muted)
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            self._is_mic_muted = self.voice_engine.toggle_mute()
+        else:
+            self._is_mic_muted = not self._is_mic_muted
+            self.events.voice_mute_toggled.emit(self._is_mic_muted)
         logger.info("Microphone mute set to: %s", self._is_mic_muted)
         return self._is_mic_muted
+
+    def start_voice_assistant(self) -> bool:
+        """Start continuous voice assistant capture."""
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            return self.voice_engine.start()
+        return False
+
+    def stop_voice_assistant(self) -> None:
+        """Stop voice assistant capture."""
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            self.voice_engine.stop()
+
+    def trigger_push_to_talk(self) -> None:
+        """Trigger push-to-talk in voice engine."""
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            self.voice_engine.trigger_push_to_talk()
+
+    def interrupt_voice(self) -> None:
+        """Interrupt voice playback (barge-in)."""
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            self.voice_engine._handle_barge_in_interruption()
 
     # --------------------------------------------------------------------------
     # Storage Architecture & Persistence Management
