@@ -30,6 +30,7 @@ from ui.views.personal_memory_view import PersonalMemoryView
 from ui.views.work_memory_view import WorkMemoryView
 from ui.views.voice_view import VoiceView
 from ui.views.ai_engine_view import AIEngineView
+from ui.views.windows_control_view import WindowsControlView
 from ui.views.settings_view import SettingsView
 
 logger = get_logger("ui.main_window")
@@ -93,6 +94,7 @@ class MainWindow(QMainWindow):
         self.page_work_memory = WorkMemoryView(self.controller)
         self.page_voice = VoiceView(self.controller)
         self.page_ai_engine = AIEngineView(self.controller)
+        self.page_windows_control = WindowsControlView(self.controller)
         self.page_settings = SettingsView(self.controller)
 
         self.content_stack.addWidget(self.page_home)            # Index 0
@@ -102,7 +104,8 @@ class MainWindow(QMainWindow):
         self.content_stack.addWidget(self.page_work_memory)     # Index 4
         self.content_stack.addWidget(self.page_voice)           # Index 5
         self.content_stack.addWidget(self.page_ai_engine)       # Index 6
-        self.content_stack.addWidget(self.page_settings)        # Index 7
+        self.content_stack.addWidget(self.page_windows_control) # Index 7
+        self.content_stack.addWidget(self.page_settings)        # Index 8
 
         main_layout.addWidget(self.content_stack)
         root_layout.addWidget(main_area)
@@ -135,7 +138,8 @@ class MainWindow(QMainWindow):
             ("work_memory", "Work Memory", 4),
             ("voice", "Voice Assistant", 5),
             ("ai_engine", "AI Engine", 6),
-            ("settings", "Settings", 7),
+            ("control", "Computer Control", 7),
+            ("settings", "Settings", 8),
         ]
 
         for nav_id, label, index in nav_items:
@@ -260,6 +264,14 @@ class MainWindow(QMainWindow):
         )
         grid.addWidget(c4, 1, 1)
 
+        # Card 5: Computer Control & Automation
+        c5 = self._create_card(
+            "WINDOWS COMPUTER CONTROL",
+            "Full Control Active",
+            "CMD & PowerShell • UAC Approval • File/App/Sys Automation"
+        )
+        grid.addWidget(c5, 2, 0, 1, 2)
+
         layout.addLayout(grid)
         layout.addStretch()
 
@@ -341,7 +353,8 @@ class MainWindow(QMainWindow):
             "work_memory": 4,
             "voice": 5,
             "ai_engine": 6,
-            "settings": 7,
+            "control": 7,
+            "settings": 8,
         }
         if page_id in nav_map:
             self._on_navigate(page_id, nav_map[page_id])

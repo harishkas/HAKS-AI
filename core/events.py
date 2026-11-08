@@ -60,6 +60,16 @@ class ApplicationEvents(QObject):
     # System resource / hardware monitoring signals
     system_metrics_updated = Signal(dict)  # cpu, ram, storage metrics
 
+    # Phase 7 Windows Computer Control signals
+    windows_command_output = Signal(str, str)  # (cmd_id, text_chunk)
+    windows_command_finished = Signal(dict)  # (command_result_dict)
+    windows_action_planned = Signal(dict)  # (action_plan_dict)
+    windows_confirmation_requested = Signal(dict)  # (action_plan_dict)
+    windows_confirmation_resolved = Signal(str, bool)  # (plan_id, approved)
+    windows_elevation_requested = Signal(dict)  # (elevation_request_dict)
+    windows_download_progress = Signal(dict)  # (download_item_dict)
+    windows_emergency_stop_triggered = Signal()
+
 
 # Singleton instance
 _events_instance: Optional[ApplicationEvents] = None

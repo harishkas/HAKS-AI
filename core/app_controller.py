@@ -76,6 +76,10 @@ class AppController:
         from voice.conversation_engine import ContinuousVoiceEngine
         self.voice_engine = ContinuousVoiceEngine(controller=self, config=self.config)
 
+        # Phase 7 Windows Computer Control & Administrative Automation
+        from windows_control.manager import WindowsControlManager
+        self.windows_control = WindowsControlManager(config=self.config, db_manager=self.db)
+
         logger.info("AppController initialized. Current theme: %s", self._current_theme)
 
     # --------------------------------------------------------------------------
@@ -786,6 +790,90 @@ class AppController:
     def recover_encryption_key(self, recovery_key: str) -> bool:
         """Restore master memory encryption cipher using recovery key."""
         return self.personal_memory.encryption.recover_with_recovery_key(recovery_key)
+
+    # --------------------------------------------------------------------------
+    # Phase 7 Windows Computer Control Integration
+    # --------------------------------------------------------------------------
+
+    def get_windows_control(self) -> Any:
+        """Return the WindowsControlManager subsystem."""
+        return self.windows_control
+
+    async def execute_windows_instruction(
+        self,
+        instruction: str,
+        source: str = "chat",
+        working_dir: Optional[str] = None,
+        bypass_confirmation: bool = False,
+    ) -> Any:
+        """Route conversational request through computer control engine."""
+        return await self.windows_control.execute_instruction(
+            instruction=instruction,
+            source=source,
+            working_dir=working_dir,
+            bypass_confirmation=bypass_confirmation,
+        )
+
+    def trigger_emergency_stop(self) -> int:
+        """Emergency Stop: immediately abort all active computer control tasks and voice playback."""
+        logger.warning("Emergency Stop requested across all HAKS subsystems.")
+        count = self.windows_control.emergency_stop()
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            self.voice_engine.player.stop()
+        if hasattr(self, "events") and self.events:
+            self.events.windows_emergency_stop_triggered.emit()
+        return count
+
+    def get_hardware_profile(self, refresh: bool = False) -> Any:
+        """Retrieve complete hardware profile including CPU, RAM, GPU, display, audio, and storage."""
+        return self.windows_control.get_complete_hardware_profile(refresh=refresh)
+
+    def evaluate_operation_capacity(
+        self,
+        operation: str,
+        target_path: Optional[str] = None,
+        required_disk_gb: float = 0.0,
+        required_ram_gb: float = 0.0,
+        requires_gpu: bool = False,
+    ) -> Any:
+        """Pre-flight check before heavy operations (model pull, big build, software download)."""
+        return self.windows_control.check_resource_safety(
+            operation=operation,
+            target_path=target_path,
+            required_disk_gb=required_disk_gb,
+            required_ram_gb=required_ram_gb,
+            requires_gpu=requires_gpu,
+        )
+
+    def discover_system_resources(
+        self,
+        include_apps: bool = True,
+        include_processes: bool = True,
+    ) -> Any:
+        """Discover drives, user folders, dev tools, Python runtimes, Git, and installed apps."""
+        return self.windows_control.discover_system_resources(
+            include_apps=include_apps,
+            include_processes=include_processes,
+        )
+
+    def search_system_files(
+        self,
+        query: str,
+        start_dir: Optional[str] = None,
+        extension: Optional[str] = None,
+        max_results: int = 100,
+    ) -> Any:
+        """Search files across drives with permission-aware directory tracking."""
+        return self.windows_control.search_system_files(
+            query=query,
+            start_dir=start_dir,
+            extension=extension,
+            max_results=max_results,
+        )
+
+    def list_system_drives(self) -> Any:
+        """List all detected Windows drives with capacity and status."""
+        return self.windows_control.list_system_drives()
 
 
 _controller_instance: Optional[AppController] = None

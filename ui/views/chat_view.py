@@ -7,7 +7,7 @@ and interactive cancellation control.
 
 import os
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
@@ -493,8 +493,63 @@ class ChatView(QWidget):
         # 1. Record user message in shared controller & conversation database
         self.controller.send_message(text, role="user")
 
-        # 2. Trigger asynchronous AI inference
+        # 2. Check for computer control instruction
+        ctrl = getattr(self.controller, "windows_control", None)
+        if ctrl is not None:
+            is_explicit_cmd = text.startswith(("/cmd ", "/ps ", "/powershell ", "/run ", "/control "))
+            plan = ctrl.interpreter.interpret(text)
+            if is_explicit_cmd or (plan.intent != "conversation" and plan.actions):
+                self._execute_computer_instruction(text, plan)
+                return
+
+        # 3. Trigger asynchronous AI inference
         self._start_ai_inference()
+
+    def _execute_computer_instruction(self, text: str, plan: Any) -> None:
+        """Execute a Windows computer control instruction asynchronously and display output."""
+        import asyncio
+        from datetime import datetime, timezone
+
+        now_str = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        summary_msg = f"⚙️ Executing system action: {plan.summary}..."
+        content_lbl, time_lbl = self._render_message_bubble("assistant", summary_msg, now_str)
+        self._scroll_to_bottom()
+
+        async def _run():
+            try:
+                res = await self.controller.execute_windows_instruction(text, source="chat")
+                out_parts = []
+                if res.stdout:
+                    out_parts.append(f"Output:\n```\n{res.stdout.strip()}\n```")
+                if res.stderr:
+                    out_parts.append(f"Error details:\n```\n{res.stderr.strip()}\n```")
+
+                status_icon = "✅" if res.success else "❌"
+                status_text = "Completed successfully" if res.success else f"Failed (exit code {res.exit_code})"
+                if res.error:
+                    status_text += f": {res.error}"
+
+                body = f"{status_icon} **{plan.summary}** — {status_text}"
+                if out_parts:
+                    body += "\n\n" + "\n\n".join(out_parts)
+
+                content_lbl.setText(body)
+                msg_data = self.controller.send_message(body, role="assistant", metadata={"action_plan": plan.summary})
+                self._just_finished_msg_id = msg_data["id"]
+            except Exception as exc:
+                err_text = f"❌ System execution error: {exc}"
+                content_lbl.setText(err_text)
+                msg_data = self.controller.send_message(err_text, role="system_error")
+                self._just_finished_msg_id = msg_data["id"]
+            finally:
+                self._scroll_to_bottom()
+
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                asyncio.create_task(_run())
+        except RuntimeError:
+            pass
 
     def _on_retry_last_message(self) -> None:
         """Retry generating the last message with currently selected engine/model."""

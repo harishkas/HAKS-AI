@@ -353,7 +353,38 @@ class ContinuousVoiceEngine:
                 await self._execute_voice_command(command_type)
                 return
 
-            # 3. Transition to THINKING
+            # 3. Check for Phase 7 Computer Control Operations
+            if self.controller and hasattr(self.controller, "windows_control"):
+                try:
+                    plan = self.controller.windows_control.interpreter.interpret(text, source="voice")
+                    if plan.operation_type in ("launch_app", "restart", "shutdown", "lock", "pip_install", "storage_analysis", "network_diagnostics"):
+                        self._set_state(VoiceState.THINKING)
+                        logger.info("Executing voice-triggered computer control action: %s", plan.objective)
+                        result = await self.controller.windows_control.execute_plan(plan)
+
+                        if result.status.value == "confirmation_required":
+                            response_text = f"Action '{plan.objective}' requires confirmation: {plan.confirmation_message}"
+                        elif result.exit_code == 0:
+                            response_text = f"Completed: {plan.objective}."
+                        else:
+                            response_text = f"Action '{plan.objective}' failed: {result.stderr or result.error or 'Execution error'}"
+
+                        self._last_spoken_response = response_text
+                        self._set_state(VoiceState.SPEAKING)
+                        spoken = await self.tts.synthesize(
+                            response_text,
+                            speed=self.config.voice.speech_speed,
+                            volume=self.config.voice.speech_volume,
+                        )
+                        if spoken.audio_path:
+                            self.player.play_file(spoken.audio_path)
+                        else:
+                            self._on_player_finished()
+                        return
+                except Exception as c_exc:
+                    logger.warning("Error evaluating voice computer control: %s", c_exc)
+
+            # 4. Transition to THINKING
             self._set_state(VoiceState.THINKING)
             self._last_turn_time = time.time()
 

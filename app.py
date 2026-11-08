@@ -108,10 +108,26 @@ def main() -> int:
         assert controller.voice_engine.tts.detect_language("Hello HAKS") == "en"
         logger.info("Phase 6 Voice Assistant verified: state machine, bilingual commands, and TTS routing active.")
 
+        # 7. Test Phase 7 Windows Computer Control Subsystems
+        ctrl = controller.get_windows_control()
+        assert ctrl is not None
+        plan_en = ctrl.interpreter.interpret("open notepad")
+        assert plan_en.operation_type == "launch_app"
+        plan_ta = ctrl.interpreter.interpret("நோட்பேட் திற")
+        assert plan_ta.operation_type == "launch_app"
+        drives = ctrl.list_system_drives()
+        assert len(drives) >= 1
+        hw = ctrl.get_complete_hardware_profile()
+        assert hw.cpu.physical_cores >= 1
+        stopped = controller.trigger_emergency_stop()
+        assert isinstance(stopped, int)
+        assert hasattr(win, "page_windows_control")
+        logger.info("Phase 7 Windows Computer Control verified: interpreter (English+Tamil), policy, hardware profiler, and UI.")
+
         controller.voice_engine.shutdown()
         win.close()
         floating.close()
-        logger.info("Phase 6 Smoke test passed successfully!")
+        logger.info("HAKS Release 0.1 Smoke test passed successfully across all phases!")
         return 0
 
     # Normal execution

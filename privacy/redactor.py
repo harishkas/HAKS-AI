@@ -43,6 +43,10 @@ class RedactionResult(BaseModel):
     def has_redactions(self) -> bool:
         return self.redactions_count > 0
 
+    @property
+    def redacted_text(self) -> str:
+        return self.sanitized_text
+
 
 class DataRedactor:
     """Configurable, deterministic text sanitization engine."""

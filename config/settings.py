@@ -171,6 +171,22 @@ class SecurityConfig(BaseModel):
     approval_timeout_seconds: int = 60
 
 
+class WindowsControlConfig(BaseModel):
+    """Windows Computer Control and Execution Policy Configuration."""
+
+    execution_mode: Literal["full_control", "safe_confirmation", "restricted"] = "full_control"
+    administrator_policy: Literal["windows_uac", "disabled"] = "windows_uac"
+    default_shell: Literal["cmd", "powershell"] = "powershell"
+    command_timeout_seconds: int = 120
+    max_concurrent_processes: int = 4
+    enable_emergency_stop: bool = True
+    default_download_dir: Path = Field(
+        default_factory=lambda: Path(os.environ.get("USERPROFILE", Path.home())) / "Downloads"
+    )
+    allow_gui_automation: bool = True
+    audit_retention_days: int = 90
+
+
 class AppConfig(BaseModel):
     """Root Application Configuration."""
 
@@ -181,6 +197,7 @@ class AppConfig(BaseModel):
     ai: AIConfig = Field(default_factory=AIConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    control: WindowsControlConfig = Field(default_factory=WindowsControlConfig)
 
 
 AppConfig.model_rebuild()

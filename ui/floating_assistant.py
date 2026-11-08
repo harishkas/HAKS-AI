@@ -5,7 +5,7 @@ Shares the exact same backend and AppController with the Main Window.
 """
 
 import os
-from typing import Optional
+from typing import Optional, Any
 
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtWidgets import (
@@ -209,8 +209,44 @@ class FloatingAssistant(QWidget):
         # Send via shared controller (writes to conversations.db, broadcasts to all UI surfaces)
         self.controller.send_message(text, role="user")
 
+        # Check for computer control instruction
+        ctrl = getattr(self.controller, "windows_control", None)
+        if ctrl is not None:
+            is_explicit_cmd = text.startswith(("/cmd ", "/ps ", "/powershell ", "/run ", "/control "))
+            plan = ctrl.interpreter.interpret(text)
+            if is_explicit_cmd or (plan.intent != "conversation" and plan.actions):
+                self._execute_floating_computer_instruction(text, plan)
+                return
+
         # Launch real AI streaming inference
         self._start_floating_inference(prompt=text)
+
+    def _execute_floating_computer_instruction(self, text: str, plan: Any) -> None:
+        """Execute a Windows computer control instruction asynchronously and display preview."""
+        import asyncio
+
+        self.lbl_response_preview.setText(f"⚙️ <i>Executing: {plan.summary}...</i>")
+
+        async def _run():
+            try:
+                res = await self.controller.execute_windows_instruction(text, source="floating")
+                status = "Done" if res.success else "Failed"
+                summary = f"{status}: {plan.summary}"
+                if res.stdout:
+                    preview = res.stdout.strip()[:100]
+                    summary += f" ({preview}...)"
+                self.lbl_response_preview.setText(f"<b>HAKS:</b> {summary}")
+                self.controller.send_message(summary, role="assistant", metadata={"action_plan": plan.summary})
+            except Exception as exc:
+                self.lbl_response_preview.setText(f"<b style='color:#ff7b72;'>Error:</b> {exc}")
+                self.controller.send_message(str(exc), role="system_error")
+
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                asyncio.create_task(_run())
+        except RuntimeError:
+            pass
 
     def _start_floating_inference(self, prompt: str = "") -> None:
         """Start asynchronous AI streaming inference for floating assistant with intelligent routing."""
