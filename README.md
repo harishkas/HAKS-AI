@@ -89,10 +89,23 @@ HAKS/
 │   ├── events.py                      # PySide6 signal bus (ApplicationEvents)
 │   └── app_controller.py              # Central application controller
 │
-├── storage/                           # SQLite database framework
+├── memory/                             # Phase 4 Memory Architecture
+│   ├── __init__.py                    # Public memory models and service exports
+│   ├── models.py                      # Pydantic models: MemoryItem, MemoryProposal, MemoryBackupBundle
+│   ├── encryption.py                  # AES-256 (Fernet + PBKDF2) encryption at rest & key recovery
+│   ├── vector_index.py                # 384-dim subword n-gram vectorizer & cosine similarity index
+│   ├── proposal_detector.py           # Automatic memory proposal pattern detector
+│   ├── proposal_manager.py            # User approval/rejection lifecycle workflow manager
+│   ├── personal_memory.py             # Personal Memory domain manager (personal_memory.db)
+│   ├── work_memory.py                 # Work Memory domain manager (work_memory.db)
+│   └── context_builder.py             # Minimal disclosure relevant memory prompt injector
+│
+├── storage/                           # SQLite database & persistence framework
 │   ├── __init__.py
 │   ├── database.py                    # Connection management, WAL mode, transaction sessions
-│   └── schema.py                      # Schemas for the 5 independent databases
+│   ├── schema.py                      # Schemas for 5 databases & Phase 4 migrations
+│   ├── backup_manager.py              # Independent domain backup, restore, export (JSON/CSV/MD), & wiping
+│   └── migration.py                   # Safe storage directory migration with conflict protection
 │
 ├── ui/                                # Desktop presentation layer
 │   ├── __init__.py
@@ -102,15 +115,15 @@ HAKS/
 │   ├── system_tray.py                 # Windows notification tray icon
 │   ├── styles.py                      # QSS stylesheet & dark design system
 │   └── views/                         # Modular UI views
-│       ├── chat_view.py               # Interactive Chat with streaming AI & engine selectors
+│       ├── chat_view.py               # Interactive Chat with streaming AI & proposal banners
 │       ├── ai_engine_view.py          # AI Engine management, diagnostics & key configuration
 │       ├── history_view.py            # Conversation history browser
-│       ├── personal_memory_view.py    # Isolated Personal Memory browser
-│       ├── work_memory_view.py        # Isolated Work Memory browser
+│       ├── personal_memory_view.py    # Isolated Personal Memory browser & proposal approval
+│       ├── work_memory_view.py        # Isolated Work Memory browser & project organizer
 │       ├── voice_view.py              # Voice pipeline state visualizer
-│       └── settings_view.py           # Application settings & theme switcher
+│       └── settings_view.py           # Application settings, storage migration, backups & themes
 │
-├── tests/                             # Automated test suite (59 tests)
+├── tests/                             # Automated test suite (87 tests)
 │   ├── __init__.py
 │   ├── conftest.py                    # Pytest fixtures (headless Qt & isolated storage)
 │   ├── test_config.py                 # Configuration tests
@@ -124,7 +137,13 @@ HAKS/
 │   ├── test_ai_manager_and_cancellation.py    # Engine switching, health, and cancellation tests
 │   ├── test_ui_chat_streaming.py      # ChatView streaming, retry flow, stop button, and privacy tests
 │   ├── test_ui_foundation.py          # MainWindow instantiation tests
-│   └── test_views.py                  # View navigation, AIEngineView controls & state tests
+│   ├── test_views.py                  # View navigation, AIEngineView controls & state tests
+│   ├── test_memory_encryption.py      # AES-256 encryption at rest, JSON & file encryption tests
+│   ├── test_memory_vector_index.py    # Vector indexing, cosine similarity, duplicate detection tests
+│   ├── test_memory_proposal_detector.py # Automatic pattern detection & scoring tests
+│   ├── test_memory_proposal_workflow.py # Approval/rejection workflow & minimal context builder tests
+│   ├── test_personal_and_work_memory_managers.py # CRUD, domain isolation, encrypted backup/restore tests
+│   └── test_storage_architecture.py   # Persistent OS storage, domain exports, wiping, migration tests
 │
 ├── logs/                              # Application log files (git-ignored)
 └── data/                              # SQLite databases (git-ignored)
@@ -168,7 +187,7 @@ ollama pull llama3.2:3b
 ## Cloud AI Configuration
 
 HAKS includes a provider-independent Cloud AI adapter supporting:
-- **Google Gemini API** (`gemini-1.5-flash`, `gemini-1.5-pro`)
+- **Google Gemini API** (`gemini-2.5-flash`, `gemini-2.5-pro`)
 - **OpenAI API** (`gpt-4o-mini`, `gpt-4o`, `o3-mini`, `gpt-4-turbo`)
 - **Groq Cloud** (`llama-3.1-8b-instant`, `llama-3.3-70b-versatile`, `mixtral-8x7b-32768`)
 - **OpenRouter** (`google/gemini-2.0-flash-001`, `meta-llama/llama-3.3-70b-instruct`, `anthropic/claude-3.5-haiku`)
@@ -224,13 +243,13 @@ cd "c:\Users\Admin\Music\HAKS AI"
 pip install -r requirements.txt
 ```
 
-### 3. Running the Test Suite (59 Tests)
+### 3. Running the Test Suite (87 Tests)
 ```powershell
 .\.venv\Scripts\pytest.exe
 ```
 Output:
 ```
-============================= 59 passed in 20.42s =============================
+============================= 87 passed in 12.24s =============================
 ```
 
 ### 4. Running the Smoke Test
@@ -263,8 +282,9 @@ Output:
 - [x] **Phase 1 — Foundation** (Configuration, Logging, SQLite WAL Databases, Basic PySide6 UI)
 - [x] **Phase 2 — Desktop UI** (Unified AppController, ChatView, Floating Assistant, History, Themes)
 - [x] **Phase 3 — AI Engine Integration** (Ollama Local AI, Cloud AI Provider Adapter, Non-Blocking Streaming, Windows Credential Manager, Cancellation)
-- [ ] **Phase 4 — Intelligent AI Routing & Privacy Management** (Rule-based routing, complexity classifier, consent manager, fallback approvals)
-- [ ] **Phase 5 — Voice Pipeline** (Silero VAD, Tamil/English STT/TTS, wake-word "Hey HAKS")
-- [ ] **Phase 6 — Windows Computer Control & Security** (OS actions, 4-tier risk classification, audit logs)
-- [ ] **Phase 7 — Offline & Disaster Recovery** (Automated backups, integrity validation)
-- [ ] **Phase 8 — Packaging & Release 0.1** (PyInstaller packaging, final verification)
+- [x] **Phase 4 — Memory Architecture** (Dual isolated memory domains, local vector search, proposal approval workflow, encryption at rest, backup/restore/export, safe storage migration)
+- [ ] **Phase 5 — Intelligent AI Routing & Privacy Management** (Hybrid rule + lightweight classifier, deterministic privacy policies, consent manager, data redactor, fallback confirmation)
+- [ ] **Phase 6 — Voice Pipeline** (Silero VAD, Tamil/English STT/TTS, wake-word "Hey HAKS")
+- [ ] **Phase 7 — Windows Computer Control & Security** (OS actions, 4-tier risk classification, audit logs)
+- [ ] **Phase 8 — Offline & Disaster Recovery** (Automated backups, integrity validation)
+- [ ] **Phase 9 — Packaging & Release 0.1** (PyInstaller packaging, final verification)
