@@ -22,9 +22,15 @@ from PySide6.QtWidgets import (
 )
 
 from config.settings import AppConfig, get_settings
-from core.events import get_app_events
+from core.app_controller import AppController, get_app_controller
 from core.logger import get_logger
-from storage.database import get_db_manager
+from ui.views.chat_view import ChatView
+from ui.views.history_view import HistoryView
+from ui.views.personal_memory_view import PersonalMemoryView
+from ui.views.work_memory_view import WorkMemoryView
+from ui.views.voice_view import VoiceView
+from ui.views.ai_engine_view import AIEngineView
+from ui.views.settings_view import SettingsView
 
 logger = get_logger("ui.main_window")
 
@@ -32,11 +38,15 @@ logger = get_logger("ui.main_window")
 class MainWindow(QMainWindow):
     """Main desktop interface for HAKS Personal AI Assistant."""
 
-    def __init__(self, config: Optional[AppConfig] = None) -> None:
+    def __init__(
+        self,
+        config: Optional[AppConfig] = None,
+        controller: Optional[AppController] = None,
+    ) -> None:
         super().__init__()
         self.config = config or get_settings()
-        self.events = get_app_events()
-        self.db_manager = get_db_manager(self.config)
+        self.controller = controller or get_app_controller(self.config)
+        self.events = self.controller.events
 
         self._nav_buttons: dict[str, QPushButton] = {}
         self._init_ui()
@@ -72,18 +82,18 @@ class MainWindow(QMainWindow):
         top_bar = self._build_top_bar()
         main_layout.addWidget(top_bar)
 
-        # Content Stack
+        # Content Stack with real functional views
         self.content_stack = QStackedWidget()
         self.content_stack.setObjectName("content_area")
 
         self.page_home = self._build_home_page()
-        self.page_chat = self._build_placeholder_page("New Chat", "Chat interface will be fully developed in Phase 2.")
-        self.page_history = self._build_placeholder_page("Conversation History", "Session history and archives will be loaded here.")
-        self.page_personal_memory = self._build_placeholder_page("Personal Memory", "Independent Personal Memory domain storage.")
-        self.page_work_memory = self._build_placeholder_page("Work Memory", "Independent Work Memory domain storage.")
-        self.page_voice = self._build_placeholder_page("Voice Assistant", "Voice pipeline, wake word 'Hey HAKS', and speech controls.")
-        self.page_ai_engine = self._build_placeholder_page("AI Engine", "Ollama local runtime & Cloud AI hybrid router.")
-        self.page_settings = self._build_placeholder_page("Settings", "Application configuration and privacy controls.")
+        self.page_chat = ChatView(self.controller)
+        self.page_history = HistoryView(self.controller)
+        self.page_personal_memory = PersonalMemoryView(self.controller)
+        self.page_work_memory = WorkMemoryView(self.controller)
+        self.page_voice = VoiceView(self.controller)
+        self.page_ai_engine = AIEngineView(self.controller)
+        self.page_settings = SettingsView(self.controller)
 
         self.content_stack.addWidget(self.page_home)            # Index 0
         self.content_stack.addWidget(self.page_chat)            # Index 1
@@ -177,6 +187,13 @@ class MainWindow(QMainWindow):
         self.badge_storage.setProperty("class", "status_badge badge_offline")
         layout.addWidget(self.badge_storage)
 
+        # Switch to Floating Assistant button
+        self.btn_floating_mode = QPushButton("Floating Mode 🗗")
+        self.btn_floating_mode.setProperty("class", "btn_secondary")
+        self.btn_floating_mode.setToolTip("Switch to compact Floating AI Assistant")
+        self.btn_floating_mode.clicked.connect(self._on_switch_to_floating)
+        layout.addWidget(self.btn_floating_mode)
+
         return top_bar
 
     def _build_home_page(self) -> QWidget:
@@ -195,10 +212,10 @@ class MainWindow(QMainWindow):
         welcome_frame = QFrame()
         welcome_frame.setProperty("class", "stat_card")
         wf_layout = QVBoxLayout(welcome_frame)
-        title = QLabel("HAKS Personal AI Assistant - Foundation Active")
+        title = QLabel("HAKS Personal AI Assistant - Foundation & Desktop UI Active")
         title.setStyleSheet("font-size: 18px; font-weight: 700; color: #58a6ff;")
         desc = QLabel(
-            "Phase 1 Foundation is operational. All 5 isolated SQLite databases are loaded with WAL mode.\n"
+            "Phase 2 Desktop UI is operational. Both Main Window and Floating Assistant share a single controller.\n"
             "Hardware-calibrated for Dell Inspiron 3576 (Intel i5-7200U, 8 GB RAM, Radeon 520)."
         )
         desc.setStyleSheet("color: #8b949e; font-size: 13px; line-height: 1.4;")
@@ -220,11 +237,10 @@ class MainWindow(QMainWindow):
         grid.addWidget(c1, 0, 0)
 
         # Card 2: Storage Architecture
-        db_stats = self.db_manager.get_stats()
         c2 = self._create_card(
             "MEMORY ARCHITECTURE",
             "5 Independent DBs",
-            f"Personal, Work, Conversations, Proposals, Settings"
+            "Personal, Work, Conversations, Proposals, Settings"
         )
         grid.addWidget(c2, 0, 1)
 
@@ -239,7 +255,7 @@ class MainWindow(QMainWindow):
         # Card 4: Voice Pipeline
         c4 = self._create_card(
             "VOICE PIPELINE",
-            "Hey HAKS",
+            'Hey HAKS',
             "Tamil, English & Mixed • Continuous Voice Support"
         )
         grid.addWidget(c4, 1, 1)
@@ -275,22 +291,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(d_lbl)
         return frame
 
-    def _build_placeholder_page(self, title: str, description: str) -> QWidget:
-        """Create a placeholder page for upcoming phase sections."""
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.setSpacing(10)
-
-        title_lbl = QLabel(title)
-        title_lbl.setStyleSheet("font-size: 20px; font-weight: 700; color: #f0f6fc;")
-        desc_lbl = QLabel(description)
-        desc_lbl.setStyleSheet("font-size: 13px; color: #8b949e;")
-
-        layout.addWidget(title_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(desc_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
-        return page
-
     def _build_status_bar(self) -> None:
         """Create the bottom status bar."""
         status_bar = QStatusBar(self)
@@ -317,11 +317,42 @@ class MainWindow(QMainWindow):
         """Connect application event bus to UI slots."""
         self.events.status_message_updated.connect(self._update_status_message)
         self.events.voice_state_changed.connect(self._update_voice_badge)
+        self.events.navigate_to_page.connect(self._on_external_navigate)
+        self.events.show_main_window_requested.connect(self._on_show_requested)
 
     def _update_status_message(self, message: str) -> None:
-        """Update bottom status bar message."""
         self.lbl_status.setText(message)
 
     def _update_voice_badge(self, state: str) -> None:
-        """Update voice status badge."""
         self.badge_voice.setText(f"Voice: {state}")
+        if state in ("LISTENING", "SPEAKING"):
+            self.badge_voice.setProperty("class", "status_badge badge_voice_active")
+        else:
+            self.badge_voice.setProperty("class", "status_badge badge_voice")
+        self.badge_voice.style().unpolish(self.badge_voice)
+        self.badge_voice.style().polish(self.badge_voice)
+
+    def _on_external_navigate(self, page_id: str) -> None:
+        nav_map = {
+            "home": 0,
+            "chat": 1,
+            "history": 2,
+            "personal_memory": 3,
+            "work_memory": 4,
+            "voice": 5,
+            "ai_engine": 6,
+            "settings": 7,
+        }
+        if page_id in nav_map:
+            self._on_navigate(page_id, nav_map[page_id])
+
+    def _on_switch_to_floating(self) -> None:
+        """Switch to compact floating assistant view."""
+        self.events.show_floating_requested.emit()
+        self.hide()
+
+    def _on_show_requested(self) -> None:
+        """Show and raise main window."""
+        self.show()
+        self.activateWindow()
+        self.raise_()

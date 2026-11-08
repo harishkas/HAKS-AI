@@ -2,9 +2,11 @@
 
 Provides a thread-safe decoupled event bus using PySide6 Signals and Slots.
 Ensures background worker threads (AI inference, audio capture, DB operations)
-can communicate with the UI without thread violations or UI freezing.
+and multiple UI surfaces (Main Window, Floating Assistant, System Tray)
+stay synchronized without tight coupling or UI thread blocking.
 """
 
+from typing import Optional
 from PySide6.QtCore import QObject, Signal
 
 
@@ -14,16 +16,30 @@ class ApplicationEvents(QObject):
     # UI & Navigation signals
     navigate_to_page = Signal(str)  # page_id (e.g., 'home', 'chat', 'memory')
     status_message_updated = Signal(str)  # message string
+    theme_changed = Signal(str)  # 'dark' or 'light'
+    show_main_window_requested = Signal()
+    show_floating_requested = Signal()
+    minimize_to_tray_requested = Signal()
+
+    # Conversation & Message signals
+    conversation_created = Signal(str, str)  # (conv_id, title)
+    conversation_loaded = Signal(str)  # conv_id
+    conversation_list_updated = Signal()
+    message_received = Signal(str, str, str, str)  # (conv_id, message_id, role, content)
+    message_chunk_received = Signal(str, str)  # (conv_id, chunk_text)
 
     # Voice pipeline state signals
     voice_state_changed = Signal(str)  # STANDBY, LISTENING, THINKING, etc.
     voice_transcript_received = Signal(str, str)  # (text, language)
+    voice_mute_toggled = Signal(bool)  # is_muted
 
     # AI engine lifecycle signals
     ai_generation_started = Signal(str)  # prompt/query
     ai_token_received = Signal(str)  # streamed chunk
     ai_generation_finished = Signal(str)  # full response
     ai_error_occurred = Signal(str)  # error description
+    ai_engine_changed = Signal(str)  # "local" or "cloud"
+    ai_models_updated = Signal(str)  # engine_type
 
     # Memory system signals
     memory_proposal_created = Signal(dict)  # proposal data
@@ -38,7 +54,7 @@ class ApplicationEvents(QObject):
 
 
 # Singleton instance
-_events_instance: ApplicationEvents | None = None
+_events_instance: Optional[ApplicationEvents] = None
 
 
 def get_app_events() -> ApplicationEvents:

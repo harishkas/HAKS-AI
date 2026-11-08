@@ -15,11 +15,14 @@ dependencies = [
     "PySide6==6.12.0",
     "pydantic==2.14.3",
     "python-dotenv==1.2.4",
+    "httpx==0.28.1",
+    "keyring==25.7.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest==9.2.0",
+    "pytest-asyncio==1.4.1.post1",
 ]
 
 [tool.pytest.ini_options]
@@ -28,3 +31,8 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --strict-markers"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "asyncio: mark test as asyncio coroutine",
+]

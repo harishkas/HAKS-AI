@@ -4,16 +4,16 @@ Ensures independent database storage files, WAL mode, foreign key enforcement,
 and clean connection pooling / lifecycle.
 """
 
+import logging
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 from typing import Generator, Optional
 
 from config.settings import AppConfig, get_settings
-from core.logger import get_logger
 from storage.schema import DATABASE_SCHEMAS
 
-logger = get_logger("storage.database")
+logger = logging.getLogger("haks.storage.database")
 
 
 class DatabaseManager:
