@@ -76,6 +76,10 @@ class ActionPlan(BaseModel):
     def is_actionable(self) -> bool:
         return self.operation_type not in ("", "conversation")
 
+    @property
+    def actions(self) -> list[str]:
+        return [self.command] if self.command else []
+
 
 class CommandResult(BaseModel):
     """Output and execution metrics from a completed command or tool action."""

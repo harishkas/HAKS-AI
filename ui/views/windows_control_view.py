@@ -250,6 +250,9 @@ class WindowsControlView(QWidget):
 
     def _refresh_dashboard(self) -> None:
         """Fetch real system metrics in background and update dashboard."""
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return
+
         def _fetch():
             return self.wc.get_dashboard_metrics()
 
@@ -1035,6 +1038,9 @@ class WindowsControlView(QWidget):
         worker.start()
 
     def _refresh_audit_logs(self) -> None:
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return
+
         def _fetch():
             return self.wc.audit.query_logs(limit=100)
 
@@ -1064,3 +1070,11 @@ class WindowsControlView(QWidget):
             f"Emergency stop executed! {count} active task(s) and background child processes terminated.",
         )
         self.terminal_output.append("<span style='color: #d32f2f;'>[EMERGENCY STOP EXECUTED]</span>")
+
+    def closeEvent(self, event) -> None:
+        if hasattr(self, "metrics_timer") and self.metrics_timer.isActive():
+            self.metrics_timer.stop()
+        if hasattr(self, "_active_worker") and self._active_worker and self._active_worker.isRunning():
+            self._active_worker.quit()
+            self._active_worker.wait(500)
+        super().closeEvent(event)

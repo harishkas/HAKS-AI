@@ -498,7 +498,7 @@ class ChatView(QWidget):
         if ctrl is not None:
             is_explicit_cmd = text.startswith(("/cmd ", "/ps ", "/powershell ", "/run ", "/control "))
             plan = ctrl.interpreter.interpret(text)
-            if is_explicit_cmd or (plan.intent != "conversation" and plan.actions):
+            if is_explicit_cmd or plan.is_actionable:
                 self._execute_computer_instruction(text, plan)
                 return
 

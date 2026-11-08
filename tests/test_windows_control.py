@@ -487,6 +487,7 @@ def test_windows_control_view_ui(qapp, controller: AppController):
     assert "File Manager" in view.tabs.tabText(3)
     assert "System" in view.tabs.tabText(4)
     assert "Security" in view.tabs.tabText(5)
+    view.close()
 
 
 def test_main_window_control_tab_integration(qapp, temp_workspace: AppConfig, controller: AppController):
@@ -501,3 +502,4 @@ def test_main_window_control_tab_integration(qapp, temp_workspace: AppConfig, co
     win.events.navigate_to_page.emit("control")
     assert win.content_stack.currentWidget() == win.page_windows_control
     assert win.lbl_page_title.text() == "Computer Control"
+    win.close()

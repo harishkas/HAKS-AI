@@ -314,7 +314,7 @@ class MainWindow(QMainWindow):
         self.lbl_db_info = QLabel("SQLite WAL: Active | Version: 0.1.0")
         status_bar.addPermanentWidget(self.lbl_db_info)
 
-    def _on_navigate(self, nav_id: str, index: int) -> None:
+    def _on_navigate(self, nav_id: str, index: int, notify_event_bus: bool = True) -> None:
         """Handle sidebar navigation clicks."""
         for nid, btn in self._nav_buttons.items():
             btn.setChecked(nid == nav_id)
@@ -323,7 +323,8 @@ class MainWindow(QMainWindow):
         btn = self._nav_buttons.get(nav_id)
         if btn:
             self.lbl_page_title.setText(btn.text())
-        self.events.navigate_to_page.emit(nav_id)
+        if notify_event_bus:
+            self.events.navigate_to_page.emit(nav_id)
 
     def _connect_signals(self) -> None:
         """Connect application event bus to UI slots."""
@@ -357,7 +358,7 @@ class MainWindow(QMainWindow):
             "settings": 8,
         }
         if page_id in nav_map:
-            self._on_navigate(page_id, nav_map[page_id])
+            self._on_navigate(page_id, nav_map[page_id], notify_event_bus=False)
 
     def _on_switch_to_floating(self) -> None:
         """Switch to compact floating assistant view."""

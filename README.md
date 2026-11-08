@@ -322,13 +322,13 @@ cd "c:\Users\Admin\Music\HAKS AI"
 pip install -r requirements.txt
 ```
 
-### 3. Running the Test Suite (126 Tests)
+### 3. Running the Test Suite (161 Tests)
 ```powershell
 .\.venv\Scripts\pytest.exe
 ```
 Output:
 ```
-============================= 126 passed in 19.55s =============================
+============================ 161 passed in 52.05s =============================
 ```
 
 ### 4. Running the Smoke Test
@@ -343,40 +343,34 @@ Output:
 
 ---
 
-## Continuous Voice Assistant & Voice Controls
+## Phase 7: Windows Computer Control & Administrative Automation
 
-HAKS includes a bilingual, continuous voice assistant pipeline with full barge-in interruption capability.
+HAKS functions as an intelligent Windows desktop operator with full hardware awareness and permission-based execution.
 
-### Voice State Flow
-```
-[STANDBY] ──("Hey HAKS" or Push-to-Talk)──> [WAKE_DETECTED] ──> [LISTENING] ──(VAD Speech End)──> [PROCESSING] ──(Faster-Whisper STT)──> [THINKING] ──(AI & Memory)──> [SPEAKING] ──(Natural End)──> [LISTENING] (Continuous Mode)
-                                                                                                                          │
-                                                                                                    (User Interrupts) ────┴──> [INTERRUPTED] ──> [LISTENING]
-```
+### Execution Policy & Safety Modes
+- **`FULL_CONTROL` (Default)**: Automatically executes ordinary low-risk commands (file searches, directory creation, app launching, non-destructive scripts) without asking for manual confirmation on every click.
+- **`SAFE_CONFIRMATION`**: Prompts the user for all file modifications and commands.
+- **`RESTRICTED`**: Read-only operations; forbids commands, installations, or modifications.
+- **Risk Classification**:
+  - `LOW`: Read-only queries, directory navigation, diagnostics, app launches.
+  - `SENSITIVE`: Single file deletion, killing non-critical processes, stopping services (prompts confirmation).
+  - `DESTRUCTIVE`: Recursive disk deletion (`del /s`), formatting drives, partition wiping, registry writes (prompts double confirmation).
+  - `BLOCKED`: Direct modifications to HAKS internal database directory, tampering with Windows Defender, or killing critical system processes (PIDs 0, 4, `csrss.exe`, `lsass.exe`, `smss.exe`).
 
-### Voice Commands (English & Tamil)
-| Command | Tamil Equivalent | Action |
+### Windows UAC Elevation Architecture
+- **Standard User Execution**: HAKS runs by default as a standard Windows user (`asInvoker`).
+- **On-Demand UAC Elevation**: When an administrative task is required (e.g., `sfc /scannow`, `net stop`, registry writes), HAKS launches an isolated elevated helper via the native Windows `ShellExecuteW(None, "runas", ...)`.
+- **Zero Bypass**: Windows displays its native UAC credential/consent dialog. If rejected or cancelled (error code 1223), execution safely halts without elevated privileges.
+- **Zero Token/Credential Storage**: No passwords or tokens are stored in memory or on disk.
+
+### Natural Language Computer Control (English & Tamil)
+| Instruction | Tamil Instruction | Interpreted Action |
 |---|---|---|
-| **"Stop HAKS"** / **"Stop"** | **"நிறுத்து"** / **"நில்"** | Stops current conversation and enters STANDBY. |
-| **"Sleep HAKS"** | **"தூங்கு"** / **"ஓய்வெடு"** | Enters low-power SLEEP state. |
-| **"Wake up HAKS"** | **"எழுந்திரு"** / **"விழி"** | Wakes assistant from SLEEP to STANDBY. |
-| **"Cancel"** | **"ரத்து செய்"** / **"வேண்டாம்"** | Aborts current voice turn immediately. |
-| **"Repeat"** | **"மீண்டும் சொல்"** / **"மறுபடியும் சொல்"** | Re-synthesizes and plays the last response. |
-| **"Stop speaking"** | **"பேசாதே"** / **"பேசுவதை நிறுத்து"** | Instantly silences audio playback and listens. |
-
----
-
-## Troubleshooting Guide
-
-| Issue | Cause | Resolution |
-|---|---|---|
-| **Ollama: Cannot connect to http://127.0.0.1:11434** | Ollama daemon is not running. | Run `ollama serve` or start Ollama from the Windows Start menu. |
-| **Model 'llama3.2:1b' not found** | Model has not been pulled to local storage. | Run `ollama pull llama3.2:1b` in terminal. |
-| **Cloud AI: Provider not configured with an API key** | API key is missing from Windows Credential Manager. | Open HAKS UI -> AI Engine -> Click "Configure API Key". |
-| **Cloud AI: Authentication failed (HTTP 400/401/403)** | API key is invalid, revoked, or expired. | Check your API key in Google AI Studio or OpenAI dashboard and re-enter. |
-| **System sluggishness during inference** | Too large a model was loaded in Ollama. | In HAKS AI Engine view, click "Unload Active Model" and switch to `llama3.2:1b`. |
-| **Headless Qt test error (`qt.qpa.plugin`)** | PySide6 cannot find a display. | Set environment variable: `$env:QT_QPA_PLATFORM="offscreen"`. (Handled automatically in `tests/conftest.py`). |
-| **Microphone not detected** | Microphone permissions or default input device disconnected. | Open HAKS UI -> Voice -> select device from "Audio Input Device" dropdown. |
+| `"open notepad"` | `"நோட்பேட் திற"` | Launches Windows Notepad (`notepad.exe`) |
+| `"check cpu and memory usage"` | `"சிபியூ பயன்பாட்டை காட்டு"` | Gathers real-time CPU & RAM utilization |
+| `"how much space is left on drive c"` | `"சி ட்ரைவ் இடம் எவ்வளவு"` | Storage analysis on drive `C:\` |
+| `"search for *.pdf files"` | `"*.pdf கோப்புகளை தேடு"` | Permission-aware search across authorized paths |
+| `"ping 8.8.8.8"` | `"8.8.8.8 பிங் செய்"` | Tests network connectivity & latency |
 
 ---
 
@@ -388,6 +382,6 @@ HAKS includes a bilingual, continuous voice assistant pipeline with full barge-i
 - [x] **Phase 4 — Memory Architecture** (Dual isolated memory domains, local vector search, proposal approval workflow, encryption at rest, backup/restore/export, safe storage migration)
 - [x] **Phase 5 — Intelligent AI Routing & Privacy Management** (Hybrid rule + lightweight classifier, deterministic privacy policies, consent manager, data redactor, fallback confirmation)
 - [x] **Phase 6 — Advanced Bilingual Voice Assistant** (Real-time sounddevice capture, dynamic VAD, "Hey HAKS" wake word, Faster-Whisper CPU int8 STT, multi-engine Edge/SAPI TTS router, barge-in interruption, continuous state machine)
-- [ ] **Phase 7 — Windows Computer Control & Security** (OS actions, 4-tier risk classification, audit logs)
+- [x] **Phase 7 — Windows Computer Control & Administrative Automation** (Full control mode, on-demand Windows UAC elevation, CMD/PowerShell streaming, system-wide multi-drive discovery & search, hardware profiler & capacity guards, process manager, software & download management with SHA-256 validation, natural language interpreter [English + Tamil], immutable audit log with secret redaction, emergency stop, and Control Center UI)
 - [ ] **Phase 8 — Offline & Disaster Recovery** (Automated backups, integrity validation)
 - [ ] **Phase 9 — Packaging & Release 0.1** (PyInstaller packaging, final verification)
