@@ -4,6 +4,7 @@ Provides a compact, draggable, always-on-top voice and quick text interface.
 Shares the exact same backend and AppController with the Main Window.
 """
 
+import os
 from typing import Optional
 
 from PySide6.QtCore import Qt, QPoint
@@ -19,9 +20,13 @@ from PySide6.QtWidgets import (
 )
 
 from config.settings import AppConfig, get_settings
+from ai.models import AIMessage
 from ai.worker import AIInferenceWorker
 from core.app_controller import AppController, get_app_controller
 from core.logger import get_logger
+from privacy.consent_manager import ConsentDecision
+from routing.models import RoutingMode
+from ui.dialogs.consent_dialog import ConsentDialog, FallbackApprovalDialog
 
 logger = get_logger("ui.floating_assistant")
 
@@ -203,21 +208,98 @@ class FloatingAssistant(QWidget):
         self.controller.send_message(text, role="user")
 
         # Launch real AI streaming inference
-        self._start_floating_inference()
+        self._start_floating_inference(prompt=text)
 
-    def _start_floating_inference(self) -> None:
-        """Start asynchronous AI streaming inference for floating assistant."""
+    def _start_floating_inference(self, prompt: str = "") -> None:
+        """Start asynchronous AI streaming inference for floating assistant with intelligent routing."""
         self._is_generating = True
         self._current_stream_text = ""
         self.btn_send.setEnabled(False)
         self.lbl_response_preview.setText("<i>● HAKS thinking...</i>")
 
-        eng_type = self.controller.get_selected_ai_engine()
+        # If prompt not passed explicitly, attempt to find latest user prompt
         messages = self.controller.get_conversation_ai_messages(limit=10)
+        if not prompt and messages:
+            for m in reversed(messages):
+                if m.role == "user":
+                    prompt = m.content
+                    break
+
+        # 1. Routing decision
+        effective_mode = self.controller.get_routing_mode()
+        decision = self.controller.route_request(
+            user_prompt=prompt,
+            mode=effective_mode,
+        )
+        target_engine = decision.selected_engine
+
+        is_headless = bool(os.environ.get("PYTEST_CURRENT_TEST")) or (
+            QApplication.instance() is not None
+            and QApplication.instance().platformName() == "offscreen"
+        )
+
+        # 2. Check engine availability fallback (never silent)
+        if effective_mode == RoutingMode.AUTO and decision.is_fallback_needed and prompt and not is_headless:
+            dialog = FallbackApprovalDialog(
+                target_engine=decision.selected_engine,
+                fallback_engine=decision.fallback_engine or "local",
+                reason=decision.fallback_reason or "Service not reachable",
+                parent=self,
+            )
+            dialog.exec()
+            if not dialog.approved_fallback:
+                self.lbl_response_preview.setText(f"<b style='color:#ff7b72;'>Cancelled:</b> {decision.selected_engine} unavailable")
+                self._is_generating = False
+                self.btn_send.setEnabled(True)
+                return
+            target_engine = decision.fallback_engine or "local"
+
+        # 3. Check Consent & Redaction
+        if decision.requires_consent and decision.consent_request and target_engine == "cloud" and not is_headless:
+            consent_dlg = ConsentDialog(decision.consent_request, parent=self)
+            consent_dlg.exec()
+            dec_val = consent_dlg.decision
+
+            if dec_val == ConsentDecision.APPROVED:
+                self.controller.consent_manager.record_decision(decision.consent_request.id, ConsentDecision.APPROVED)
+                self.controller.consent_manager.consume_consent(decision.consent_request.id)
+                # Redacted if applicable
+                if decision.redaction_preview and messages and messages[-1].role == "user":
+                    messages[-1].content = decision.redaction_preview.sanitized_text
+            elif dec_val == ConsentDecision.USE_LOCAL:
+                self.controller.consent_manager.record_decision(decision.consent_request.id, ConsentDecision.USE_LOCAL)
+                target_engine = "local"
+            else:
+                self.controller.consent_manager.record_decision(decision.consent_request.id, ConsentDecision.CANCELLED)
+                self.lbl_response_preview.setText("<i>Transmission cancelled by user.</i>")
+                self._is_generating = False
+                self.btn_send.setEnabled(True)
+                return
+
+        # 4. Inject Memory Context with privacy constraints
+        if prompt:
+            try:
+                mem_context = self.controller.context_builder.build_context(
+                    query=prompt,
+                    include_personal=True,
+                    include_work=True,
+                    top_k_per_domain=2,
+                    min_relevance=0.25,
+                    is_cloud_target=(target_engine == "cloud"),
+                    redact_for_cloud=(target_engine == "cloud"),
+                )
+                if mem_context:
+                    sys_msg = AIMessage(
+                        role="system",
+                        content=f"Context from memory:\n{mem_context}\nAnswer user queries using this context where helpful.",
+                    )
+                    messages.insert(0, sys_msg)
+            except Exception as exc:
+                logger.warning("Could not append memory context in floating assistant: %s", exc)
 
         self._worker = AIInferenceWorker(
             messages=messages,
-            engine_type=eng_type,
+            engine_type=target_engine,
             manager=self.controller.get_ai_manager(),
             parent=self,
         )

@@ -99,6 +99,11 @@ class CloudAIEngine(AIEngineInterface):
         return f"Cloud AI ({name})"
 
     @property
+    def provider_name(self) -> str:
+        adapter = self.get_active_adapter()
+        return adapter.display_name if adapter else "Cloud AI"
+
+    @property
     def active_provider_id(self) -> str:
         return self.config.provider.lower().strip()
 

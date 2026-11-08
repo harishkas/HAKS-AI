@@ -1,8 +1,9 @@
 """Independent Backup, Restore, Export, and Wiping Manager for HAKS Storage Domains.
 
 Guarantees complete domain isolation: operations on Personal Memory never touch
-Work Memory or Conversations. Supports AES-256 encrypted archive bundles,
-cross-platform JSON, CSV, and Markdown exports, and guarded deletion.
+Work Memory or Conversations. Supports authenticated Fernet encrypted archive bundles
+(AES-128-CBC with HMAC-SHA256, 256-bit master key), cross-platform JSON, CSV,
+and Markdown exports, and guarded deletion.
 """
 
 import csv
@@ -63,7 +64,7 @@ class BackupManager:
         Args:
             domain: Domain to back up ('personal_memory', 'work_memory', 'conversations', 'settings')
             target_dir: Optional destination directory (defaults to configured backups_dir)
-            encrypt: Whether to encrypt the resulting backup bundle using AES-256
+            encrypt: Whether to encrypt the resulting backup bundle using Fernet (AES-128-CBC + HMAC-SHA256)
 
         Returns:
             Path to created backup file (.zip or .haksbackup)

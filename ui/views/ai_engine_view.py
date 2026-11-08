@@ -31,6 +31,7 @@ from ai.local_engine import RECOMMENDED_LIGHTWEIGHT_MODELS
 from ai.worker import ModelDownloadWorker
 from core.app_controller import AppController, get_app_controller
 from core.logger import get_logger
+from routing.models import RoutingMode
 
 logger = get_logger("ui.views.ai_engine_view")
 
@@ -73,6 +74,18 @@ class AIEngineView(QWidget):
         header.addLayout(title_box)
 
         header.addStretch()
+
+        # Routing Policy Selector
+        lbl_routing = QLabel("Routing Policy:")
+        lbl_routing.setStyleSheet("color: #8b949e; font-size: 12px; font-weight: 600;")
+        header.addWidget(lbl_routing)
+
+        self.combo_default_routing_mode = QComboBox()
+        self.combo_default_routing_mode.addItem("🤖 Auto (Intelligent)", "AUTO")
+        self.combo_default_routing_mode.addItem("⚙️ Manual", "MANUAL_LOCAL")
+        self.combo_default_routing_mode.addItem("🔒 Force Local-Only", "FORCE_LOCAL")
+        self.combo_default_routing_mode.currentIndexChanged.connect(self._on_routing_policy_changed)
+        header.addWidget(self.combo_default_routing_mode)
 
         # Default engine selector
         lbl_def = QLabel("Default Engine:")
@@ -342,6 +355,13 @@ class AIEngineView(QWidget):
         """Populate widgets with active engine state."""
         mgr = self.controller.get_ai_manager()
 
+        # Routing mode
+        cur_mode = self.controller.get_routing_mode().value
+        for i in range(self.combo_default_routing_mode.count()):
+            if self.combo_default_routing_mode.itemData(i) == cur_mode:
+                self.combo_default_routing_mode.setCurrentIndex(i)
+                break
+
         # Default engine
         cur_def = self.controller.get_selected_ai_engine()
         idx_def = 1 if cur_def == "cloud" else 0
@@ -363,6 +383,14 @@ class AIEngineView(QWidget):
 
         # Quick health probe
         QTimer.singleShot(200, self._quick_health_probe)
+
+    def _on_routing_policy_changed(self, index: int) -> None:
+        """Persist default routing policy."""
+        mode_val = self.combo_default_routing_mode.currentData()
+        try:
+            self.controller.set_routing_mode(RoutingMode(mode_val))
+        except Exception as exc:
+            logger.warning("Could not set routing mode '%s': %s", mode_val, exc)
 
     def _refresh_local_models(self) -> None:
         """Refresh local models dropdown."""

@@ -22,6 +22,11 @@ from memory.work_memory import WorkMemoryManager
 from storage.backup_manager import BackupManager
 from storage.database import DatabaseManager, get_db_manager
 from storage.migration import StorageMigrationService
+from privacy.classifier import get_privacy_classifier
+from privacy.redactor import get_data_redactor
+from privacy.consent_manager import get_consent_manager
+from routing.complexity import get_complexity_classifier
+from routing.models import RoutingDecision, RoutingMode
 
 if TYPE_CHECKING:
     from ai.manager import AIEngineManager
@@ -59,6 +64,13 @@ class AppController:
         self.context_builder = MemoryContextBuilder(self.personal_memory, self.work_memory)
         self.backup_manager = BackupManager(self.config, self.db, self.personal_memory.encryption)
         self.migration_service = StorageMigrationService(self.config, self.db)
+
+        # Phase 5 Privacy & Intelligent Routing Subsystems
+        self.privacy_classifier = get_privacy_classifier()
+        self.complexity_classifier = get_complexity_classifier()
+        self.redactor = get_data_redactor()
+        self.consent_manager = get_consent_manager()
+        self._router: Optional[Any] = None
 
         logger.info("AppController initialized. Current theme: %s", self._current_theme)
 
@@ -344,6 +356,47 @@ class AppController:
         mgr.set_active_engine(norm)
         self.events.ai_engine_changed.emit(norm)
         logger.info("Active AI engine persisted as: %s", norm)
+
+    def get_router(self) -> Any:
+        """Return the singleton AIEngineRouter instance."""
+        if self._router is None:
+            from routing.router import AIEngineRouter
+            self._router = AIEngineRouter(
+                ai_manager=self.get_ai_manager(),
+                privacy_classifier=self.privacy_classifier,
+                complexity_classifier=self.complexity_classifier,
+                redactor=self.redactor,
+                consent_manager=self.consent_manager,
+            )
+        return self._router
+
+    def get_routing_mode(self) -> RoutingMode:
+        """Get the active routing mode (AUTO, LOCAL, CLOUD, FORCE_LOCAL)."""
+        raw_mode = self.get_setting("routing_mode", "AUTO")
+        try:
+            return RoutingMode(raw_mode)
+        except ValueError:
+            return RoutingMode.AUTO
+
+    def set_routing_mode(self, mode: RoutingMode) -> None:
+        """Persist active routing mode."""
+        self.set_setting("routing_mode", mode.value, section="ai")
+        logger.info("Routing mode set to: %s", mode.value)
+
+    def route_request(
+        self,
+        user_prompt: str,
+        mode: Optional[RoutingMode] = None,
+        memory_context: str = "",
+    ) -> RoutingDecision:
+        """Compute an authoritative routing decision using the AIEngineRouter."""
+        effective_mode = mode or self.get_routing_mode()
+        router = self.get_router()
+        return router.route(
+            user_prompt=user_prompt,
+            mode=effective_mode,
+            retrieved_memory_context=memory_context,
+        )
 
     def get_conversation_ai_messages(self, conv_id: Optional[str] = None, limit: int = 20) -> list[Any]:
         """Convert stored conversation messages into typed AIMessage objects for AI context.

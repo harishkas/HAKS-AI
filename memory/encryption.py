@@ -1,7 +1,8 @@
 """Cryptographic service providing encryption at rest for HAKS memory storage and backups.
 
-Uses authenticated AES-256 symmetric encryption (Fernet) with PBKDF2HMAC
-key derivation and key persistence in Windows Credential Manager.
+Uses authenticated AES-128-CBC symmetric encryption with HMAC-SHA256 (Fernet specification,
+derived from a 256-bit master key: 128-bit encryption + 128-bit authentication)
+with PBKDF2HMAC SHA-256 key derivation and key persistence in Windows Credential Manager.
 """
 
 import base64

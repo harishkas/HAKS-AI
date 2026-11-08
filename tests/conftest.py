@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from config.settings import AppConfig, SystemPaths
+from core.app_controller import AppController
 from storage.database import DatabaseManager
 
 
@@ -21,11 +22,6 @@ def qapp():
     if app is None:
         app = QApplication(sys.argv)
     yield app
-
-
-def pytest_sessionfinish(session, exitstatus):
-    """Ensure clean process exit on Windows Python 3.14 without C++ static destructor abort."""
-    os._exit(exitstatus)
 
 
 @pytest.fixture
@@ -49,3 +45,9 @@ def test_db_manager(temp_workspace: AppConfig) -> DatabaseManager:
     db_manager = DatabaseManager(temp_workspace)
     db_manager.initialize()
     return db_manager
+
+
+@pytest.fixture
+def controller(temp_workspace: AppConfig, test_db_manager: DatabaseManager) -> AppController:
+    """Fixture providing an isolated AppController."""
+    return AppController(config=temp_workspace, db_manager=test_db_manager)

@@ -40,6 +40,7 @@ class ApplicationEvents(QObject):
     ai_error_occurred = Signal(str)  # error description
     ai_engine_changed = Signal(str)  # "local" or "cloud"
     ai_models_updated = Signal(str)  # engine_type
+    routing_decision_updated = Signal(dict)  # routing decision data packet
 
     # Memory system signals
     memory_proposal_created = Signal(dict)  # proposal data

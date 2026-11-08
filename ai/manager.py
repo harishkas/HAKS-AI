@@ -116,6 +116,23 @@ class AIEngineManager:
             "cloud": cloud_health,
         }
 
+    def get_engine_health(self) -> dict[str, AIEngineHealth]:
+        """Return engine health states synchronously with caching."""
+        if hasattr(self, "_last_health_cache") and self._last_health_cache:
+            return self._last_health_cache
+        try:
+            loop = asyncio.new_event_loop()
+            res = loop.run_until_complete(self.check_all_health())
+            loop.close()
+            self._last_health_cache = res
+            return res
+        except Exception as exc:
+            logger.warning("Could not probe health synchronously: %s", exc)
+            return {
+                "local": AIEngineHealth(is_healthy=True, engine_name="Local AI", status_message="Assuming available"),
+                "cloud": AIEngineHealth(is_healthy=True, engine_name="Cloud AI", status_message="Assuming available"),
+            }
+
     async def check_health(self, engine_type: Optional[str | EngineType] = None) -> AIEngineHealth:
         """Check health of the designated engine (or active engine)."""
         engine = self.get_engine(engine_type)

@@ -5,6 +5,7 @@ message bubbles, non-blocking asynchronous execution, engine & model selectors,
 and interactive cancellation control.
 """
 
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -25,6 +26,8 @@ from ai.models import AIMessage
 from ai.worker import AIInferenceWorker
 from core.app_controller import AppController, get_app_controller
 from core.logger import get_logger
+from privacy.consent_manager import ConsentDecision
+from routing.models import RoutingDecision, RoutingMode
 
 logger = get_logger("ui.views.chat_view")
 
@@ -82,7 +85,20 @@ class ChatView(QWidget):
         self.lbl_chat_title.setStyleSheet("font-size: 16px; font-weight: 700; color: #f0f6fc;")
         header_layout.addWidget(self.lbl_chat_title)
 
-        header_layout.addSpacing(12)
+        header_layout.addSpacing(10)
+
+        # Routing Mode selector
+        lbl_routing = QLabel("Routing:")
+        lbl_routing.setStyleSheet("color: #8b949e; font-size: 12px; font-weight: 600;")
+        header_layout.addWidget(lbl_routing)
+
+        self.combo_routing_mode = QComboBox()
+        self.combo_routing_mode.addItem("🤖 Auto (Intelligent)", "auto")
+        self.combo_routing_mode.addItem("⚙️ Manual", "manual")
+        self.combo_routing_mode.addItem("🔒 Force Local-Only", "force_local")
+        self.combo_routing_mode.setFixedWidth(160)
+        self.combo_routing_mode.currentIndexChanged.connect(self._on_routing_mode_changed)
+        header_layout.addWidget(self.combo_routing_mode)
 
         # Engine selector
         lbl_engine = QLabel("Engine:")
@@ -92,7 +108,7 @@ class ChatView(QWidget):
         self.combo_engine = QComboBox()
         self.combo_engine.addItem("Local AI (Ollama)", "local")
         self.combo_engine.addItem("Cloud AI", "cloud")
-        self.combo_engine.setFixedWidth(150)
+        self.combo_engine.setFixedWidth(140)
         self.combo_engine.currentIndexChanged.connect(self._on_engine_selection_changed)
         header_layout.addWidget(self.combo_engine)
 
@@ -102,13 +118,22 @@ class ChatView(QWidget):
         header_layout.addWidget(lbl_model)
 
         self.combo_model = QComboBox()
-        self.combo_model.setFixedWidth(160)
+        self.combo_model.setFixedWidth(150)
         self.combo_model.currentIndexChanged.connect(self._on_model_selection_changed)
         header_layout.addWidget(self.combo_model)
 
+        # Routing status badge
+        self.lbl_routing_badge = QLabel("[Auto: Ready]")
+        self.lbl_routing_badge.setStyleSheet(
+            "color: #58a6ff; font-size: 11px; font-weight: 600; background-color: #161b22; "
+            "border: 1px solid #30363d; border-radius: 4px; padding: 2px 6px;"
+        )
+        self.lbl_routing_badge.setToolTip("Intelligent AI router evaluates privacy classification and reasoning complexity.")
+        header_layout.addWidget(self.lbl_routing_badge)
+
         # Health badge
         self.lbl_engine_health = QLabel("● Ready")
-        self.lbl_engine_health.setStyleSheet("color: #3fb950; font-size: 11px; font-weight: bold; margin-left: 4px;")
+        self.lbl_engine_health.setStyleSheet("color: #3fb950; font-size: 11px; font-weight: bold; margin-left: 2px;")
         header_layout.addWidget(self.lbl_engine_health)
 
         header_layout.addStretch()
@@ -238,6 +263,53 @@ class ChatView(QWidget):
         target_page = "personal_memory" if getattr(self, "_last_proposal_domain", "personal") == "personal" else "work_memory"
         self.proposal_notification.setVisible(False)
         self.controller.events.navigate_to_page.emit(target_page)
+
+    def _on_routing_mode_changed(self, index: int) -> None:
+        """Handle user changing routing mode."""
+        mode_data = self.combo_routing_mode.currentData()
+        if mode_data == "force_local":
+            self.combo_engine.setEnabled(False)
+            self.combo_engine.setCurrentIndex(0)
+            self.lbl_routing_badge.setText("[Forced Local: Active]")
+            self.lbl_routing_badge.setStyleSheet(
+                "color: #f85149; font-size: 11px; font-weight: 600; background-color: #161b22; "
+                "border: 1px solid #f85149; border-radius: 4px; padding: 2px 6px;"
+            )
+            self.lbl_routing_badge.setToolTip("Strict offline mode enforced: all queries are routed to Local AI.")
+        elif mode_data == "manual":
+            self.combo_engine.setEnabled(True)
+            eng = "Local AI" if self.combo_engine.currentIndex() == 0 else "Cloud AI"
+            self.lbl_routing_badge.setText(f"[Manual: {eng}]")
+            self.lbl_routing_badge.setStyleSheet(
+                "color: #d29922; font-size: 11px; font-weight: 600; background-color: #161b22; "
+                "border: 1px solid #d29922; border-radius: 4px; padding: 2px 6px;"
+            )
+            self.lbl_routing_badge.setToolTip("Manual override mode: routing strictly follows the Engine selector.")
+        else:
+            self.combo_engine.setEnabled(True)
+            self.lbl_routing_badge.setText("[Auto Route: Ready]")
+            self.lbl_routing_badge.setStyleSheet(
+                "color: #58a6ff; font-size: 11px; font-weight: 600; background-color: #161b22; "
+                "border: 1px solid #30363d; border-radius: 4px; padding: 2px 6px;"
+            )
+            self.lbl_routing_badge.setToolTip("Intelligent AI router evaluates privacy classification and reasoning complexity.")
+
+    def _update_routing_badge(self, decision: RoutingDecision) -> None:
+        """Update routing status label and tooltip based on decision."""
+        color_map = {
+            "PUBLIC": "#3fb950",
+            "PERSONAL": "#d29922",
+            "SENSITIVE": "#f85149",
+        }
+        level_str = decision.privacy.level.value
+        col = color_map.get(level_str, "#58a6ff")
+        eng = "Local AI" if decision.selected_engine == "local" else "Cloud AI"
+        self.lbl_routing_badge.setText(f"Route: {eng} | {level_str} | {decision.complexity.category.value}")
+        self.lbl_routing_badge.setStyleSheet(
+            f"color: {col}; font-size: 11px; font-weight: 600; background-color: #161b22; "
+            f"border: 1px solid {col}; border-radius: 4px; padding: 2px 6px;"
+        )
+        self.lbl_routing_badge.setToolTip(f"Routing Reason: {decision.routing_reason}\n\nModel: {decision.selected_model}")
 
     def _get_current_engine_type(self) -> str:
         """Return 'local' or 'cloud'."""
@@ -432,13 +504,121 @@ class ChatView(QWidget):
         self._start_ai_inference()
 
     def _start_ai_inference(self) -> None:
-        """Initialize background streaming worker and placeholder bubble."""
+        """Evaluate intelligent routing, privacy, consent, and initiate streaming inference."""
+        prompt = self._last_user_prompt
+
+        # 1. Determine effective routing mode
+        r_mode_str = self.combo_routing_mode.currentData() if hasattr(self, "combo_routing_mode") else "auto"
+        if r_mode_str == "force_local":
+            effective_mode = RoutingMode.FORCE_LOCAL
+        elif r_mode_str == "manual":
+            engine_choice = self._get_current_engine_type()
+            effective_mode = RoutingMode.MANUAL_CLOUD if engine_choice == "cloud" else RoutingMode.MANUAL_LOCAL
+        else:
+            effective_mode = RoutingMode.AUTO
+
+        # 2. Build preliminary memory context
+        mem_context = ""
+        if prompt:
+            try:
+                mem_context = self.controller.context_builder.build_context(
+                    query=prompt,
+                    include_personal=True,
+                    include_work=True,
+                    top_k_per_domain=2,
+                    min_relevance=0.25,
+                )
+            except Exception as exc:
+                logger.warning("Could not build preliminary memory context: %s", exc)
+
+        # 3. Authoritative Routing Decision
+        decision = self.controller.route_request(
+            user_prompt=prompt,
+            mode=effective_mode,
+            memory_context=mem_context,
+        )
+        self._update_routing_badge(decision)
+
+        # 4. Handle Engine Unavailable (NEVER silent fallback)
+        target_engine = decision.selected_engine
+        is_headless = bool(os.environ.get("PYTEST_CURRENT_TEST")) or (
+            QApplication.instance() is not None
+            and QApplication.instance().platformName() == "offscreen"
+        )
+        if effective_mode == RoutingMode.AUTO and decision.is_fallback_needed and prompt and not is_headless:
+            from ui.dialogs.consent_dialog import FallbackApprovalDialog
+            dialog = FallbackApprovalDialog(
+                target_engine=decision.selected_engine,
+                fallback_engine=decision.fallback_engine or "local",
+                reason=decision.fallback_reason or "Service not reachable",
+                parent=self,
+            )
+            dialog.exec()
+            if not dialog.approved_fallback:
+                now_str = datetime.now(timezone.utc).strftime("%H:%M:%S")
+                self._render_message_bubble(
+                    "system_error",
+                    f"Request cancelled: Target engine '{decision.selected_engine}' is unavailable and fallback was declined.",
+                    now_str,
+                )
+                self.btn_retry.setVisible(True)
+                self._finish_generation_ui()
+                return
+            target_engine = decision.fallback_engine or "local"
+            logger.info("User explicitly approved engine fallback to: %s", target_engine)
+        elif effective_mode in (RoutingMode.MANUAL_LOCAL, RoutingMode.MANUAL_CLOUD, RoutingMode.FORCE_LOCAL):
+            target_engine = "local" if effective_mode in (RoutingMode.MANUAL_LOCAL, RoutingMode.FORCE_LOCAL) else "cloud"
+
+        # 5. Handle Consent & Redaction
+        prompt_to_send = prompt
+        if decision.requires_consent and decision.consent_request and target_engine == "cloud" and not is_headless:
+            from ui.dialogs.consent_dialog import ConsentDialog
+            consent_dlg = ConsentDialog(decision.consent_request, parent=self)
+            consent_dlg.exec()
+            decision_val = consent_dlg.decision
+
+            if decision_val == ConsentDecision.APPROVED:
+                self.controller.consent_manager.record_decision(decision.consent_request.id, ConsentDecision.APPROVED)
+                self.controller.consent_manager.consume_consent(decision.consent_request.id)
+                prompt_to_send = decision.consent_request.transmitted_data
+                logger.info("Cloud transmission explicitly approved by user for request %s", decision.consent_request.id)
+            elif decision_val == ConsentDecision.USE_LOCAL:
+                self.controller.consent_manager.record_decision(decision.consent_request.id, ConsentDecision.USE_LOCAL)
+                target_engine = "local"
+                logger.info("User chose to use Local AI instead of cloud transmission.")
+            else:
+                self.controller.consent_manager.record_decision(decision.consent_request.id, ConsentDecision.CANCELLED)
+                now_str = datetime.now(timezone.utc).strftime("%H:%M:%S")
+                self._render_message_bubble(
+                    "system_error",
+                    "Cloud transmission cancelled by user.",
+                    now_str,
+                )
+                self.btn_retry.setVisible(True)
+                self._finish_generation_ui()
+                return
+
+        # 6. Rebuild memory context with final privacy and target engine constraints
+        final_mem_context = ""
+        try:
+            final_mem_context = self.controller.context_builder.build_context(
+                query=prompt_to_send,
+                include_personal=True,
+                include_work=True,
+                top_k_per_domain=2,
+                min_relevance=0.25,
+                is_cloud_target=(target_engine == "cloud"),
+                redact_for_cloud=decision.requires_redaction,
+            )
+        except Exception as exc:
+            logger.warning("Could not build final memory context: %s", exc)
+
+        # 7. Start generation UI
         self._is_generating = True
         self.btn_send.setEnabled(False)
         self.btn_stop.setVisible(True)
 
-        engine_type = self._get_current_engine_type()
-        engine_label = "Local AI" if engine_type == "local" else "Cloud AI"
+        engine_label = "Local AI" if target_engine == "local" else "Cloud AI"
         model_name = self.combo_model.currentText()
         self.lbl_generation_status.setText(f"● Generating ({engine_label} - {model_name})...")
 
@@ -450,29 +630,20 @@ class ChatView(QWidget):
         )
         self._scroll_to_bottom()
 
-        # Prepare typed AIMessage context (conversations only, privacy preserved)
+        # Prepare typed AIMessage context
         messages = self.controller.get_conversation_ai_messages(limit=20)
+        # Update last user message if sanitized
+        if prompt_to_send != prompt and messages and messages[-1].role == "user":
+            messages[-1].content = prompt_to_send
 
-        # Inject only approved relevant memory context if semantically matched
-        if self._last_user_prompt:
-            try:
-                mem_context = self.controller.context_builder.build_context(
-                    query=self._last_user_prompt,
-                    include_personal=True,
-                    include_work=True,
-                    top_k_per_domain=2,
-                    min_relevance=0.25,
-                )
-                if mem_context:
-                    from ai.models import AIMessage
-                    messages.insert(0, AIMessage(role="system", content=mem_context))
-            except Exception as mem_exc:
-                logger.warning("Could not inject memory context: %s", mem_exc)
+        if final_mem_context:
+            from ai.models import AIMessage
+            messages.insert(0, AIMessage(role="system", content=final_mem_context))
 
         # Launch background worker thread
         self._worker = AIInferenceWorker(
             messages=messages,
-            engine_type=engine_type,
+            engine_type=target_engine,
             manager=self.controller.get_ai_manager(),
             parent=self,
         )

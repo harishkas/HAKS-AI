@@ -78,6 +78,16 @@ class AIEngineHealth(BaseModel):
     latency_ms: Optional[float] = None
     details: dict[str, Any] = Field(default_factory=dict)
 
+    @property
+    def is_available(self) -> bool:
+        """Alias for is_healthy."""
+        return self.is_healthy
+
+    @property
+    def message(self) -> str:
+        """Alias for status_message."""
+        return self.status_message
+
 
 class EngineCapabilities(BaseModel):
     """Declared capabilities of an AI engine."""
