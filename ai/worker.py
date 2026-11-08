@@ -83,6 +83,14 @@ class AIInferenceWorker(QThread):
                     "finish_reason": finish_reason,
                     "usage": final_usage,
                 }
+                if not full_text.strip():
+                    logger.warning(
+                        "AI inference completed with empty response. Engine: %s, model: %s, chunks: %d, finish_reason: %s",
+                        engine.engine_name,
+                        getattr(engine, "current_model", "unknown"),
+                        len(accumulated_text),
+                        finish_reason,
+                    )
                 self.signals.finished.emit(full_text, metadata)
 
             except GenerationCancelledError:

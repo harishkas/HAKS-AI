@@ -39,6 +39,7 @@ class NetworkMonitor(QObject):
         self._online_callbacks: list[Callable[[], None]] = []
         self._offline_callbacks: list[Callable[[], None]] = []
         self._is_polling = False
+        self._is_shutting_down = False
         self._mock_status: Optional[bool] = None
 
         self._timer = QTimer(self)
@@ -54,17 +55,44 @@ class NetworkMonitor(QObject):
 
     def start_monitoring(self) -> None:
         """Begin periodic background connectivity polling."""
+        if getattr(self, "_is_shutting_down", False):
+            return
+
+        from PySide6.QtCore import QCoreApplication, QThread
+        if QCoreApplication.instance() is None:
+            logger.debug("QCoreApplication instance not available; network timer deferred.")
+            return
+
+        dispatcher = QThread.currentThread().eventDispatcher()
+        if dispatcher is None:
+            logger.debug("Current thread event dispatcher not available; network timer deferred.")
+            return
+
         if not self._is_polling:
-            self._timer.start()
-            self._is_polling = True
-            logger.info("Network monitoring started (interval=%ss).", self.poll_interval_ms // 1000)
+            if hasattr(self, "_timer"):
+                self._timer.start()
+                self._is_polling = True
+                logger.info("Network monitoring started (interval=%ss).", self.poll_interval_ms // 1000)
 
     def stop_monitoring(self) -> None:
         """Stop background connectivity polling."""
         if self._is_polling:
-            self._timer.stop()
+            if hasattr(self, "_timer") and self._timer.isActive():
+                self._timer.stop()
             self._is_polling = False
             logger.info("Network monitoring stopped.")
+
+    def shutdown(self) -> None:
+        """Safely terminate network monitoring and disconnect callbacks."""
+        self._is_shutting_down = True
+        self.stop_monitoring()
+        try:
+            if hasattr(self, "_timer"):
+                self._timer.timeout.disconnect(self._on_poll)
+        except (RuntimeError, TypeError):
+            pass
+        self._online_callbacks.clear()
+        self._offline_callbacks.clear()
 
     def add_online_callback(self, cb: Callable[[], None]) -> None:
         """Register callback invoked when transitioning to ONLINE."""

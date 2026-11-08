@@ -80,8 +80,10 @@ class OfflineRecoveryManager:
 
     def shutdown(self) -> None:
         """Safely record clean exit and shutdown network monitor."""
-        self.network.stop_monitoring()
-        self.disaster.record_clean_shutdown()
+        if hasattr(self, "network") and self.network:
+            self.network.shutdown()
+        if hasattr(self, "disaster") and self.disaster:
+            self.disaster.record_clean_shutdown()
 
     # --------------------------------------------------------------------------
     # 2. Network Transitions & Connectivity

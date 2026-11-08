@@ -10,6 +10,10 @@ import argparse
 import os
 import sys
 
+# High DPI and Qt Platform logging rules
+os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
+os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.window.warning=false")
+
 from config.settings import get_settings
 from core.app_controller import get_app_controller
 from core.logger import get_logger, setup_logging
@@ -59,14 +63,14 @@ def main() -> int:
         stats = db.get_stats()
         logger.info("Database verification passed: %d databases active.", len(stats))
 
-        # 2. Test shared AppController
+        # 2. Qt application instance MUST exist before services with QTimers/QObjects initialize
+        from PySide6.QtWidgets import QApplication
+        qapp = QApplication.instance() or QApplication(sys.argv)
+
+        # 3. Test shared AppController
         controller = get_app_controller(config)
         conv_id = controller.get_active_conversation_id()
         logger.info("Shared AppController initialized with active conversation: %s", conv_id)
-
-        # 3. Test Qt application and UI windows instantiation
-        from PySide6.QtWidgets import QApplication
-        qapp = QApplication.instance() or QApplication(sys.argv)
 
         from ui.main_window import MainWindow
         from ui.floating_assistant import FloatingAssistant
@@ -154,7 +158,7 @@ def main() -> int:
         floating.deleteLater()
         qapp.processEvents()
         logger.info("HAKS Release 0.1 Smoke test passed successfully across all phases!")
-        os._exit(0)
+        return 0
 
     # Normal execution
     app = HaksApplication(config)

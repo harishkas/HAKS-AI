@@ -391,6 +391,10 @@ class ContinuousVoiceEngine:
             # 4. Integrate with Shared Controller, AI Routing, & Memory Architecture
             response_text = await self._generate_ai_response(text)
             if not response_text:
+                logger.warning(
+                    "AI engine returned empty response for voice prompt (engine=%s). Showing fallback.",
+                    engine_type,
+                )
                 response_text = "I processed your request, but received an empty response."
 
             self._last_spoken_response = response_text
@@ -502,26 +506,17 @@ class ContinuousVoiceEngine:
         # 4. Phase 5 AI Routing & Privacy Policy Enforcement
         ai_mgr = self.controller.get_ai_manager()
         engine_type = "local"
-        if hasattr(self.controller, "router") and self.controller.router is not None:
-            try:
-                active_engine = self.controller.get_selected_ai_engine()
-                decision = self.controller.router.route_request(
-                    query=prompt_text,
-                    user_preferred_engine=active_engine,
-                    is_online=True,
-                    local_model_loaded=True,
-                )
-                engine_type = decision.selected_engine
-                logger.info(
-                    "Voice AI Router selected engine: %s (Privacy: %s, Complexity: %s)",
-                    engine_type,
-                    decision.privacy_level.value,
-                    decision.complexity_level.value,
-                )
-            except Exception as r_exc:
-                logger.warning("Voice routing evaluation failed: %s. Using default.", r_exc)
-                engine_type = self.controller.get_selected_ai_engine()
-        else:
+        try:
+            decision = self.controller.route_request(user_prompt=prompt_text)
+            engine_type = decision.selected_engine
+            logger.info(
+                "Voice AI Router selected engine: %s (Privacy: %s, Complexity: %s)",
+                engine_type,
+                decision.privacy_level.value,
+                decision.complexity_level.value,
+            )
+        except Exception as r_exc:
+            logger.warning("Voice routing evaluation failed: %s. Using default.", r_exc)
             engine_type = self.controller.get_selected_ai_engine()
 
         # 5. Generate response
@@ -599,7 +594,12 @@ class ContinuousVoiceEngine:
     def __del__(self) -> None:
         try:
             self.controller = None
-            self.shutdown()
+            self._stop_event.set()
+            if hasattr(self, "_executor") and self._executor is not None:
+                try:
+                    self._executor.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
         except Exception:
             pass
 

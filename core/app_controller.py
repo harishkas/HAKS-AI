@@ -428,12 +428,27 @@ class AppController:
         target_id = conv_id or self.get_active_conversation_id()
         raw_msgs = self.load_conversation(target_id, emit_event=False)
         recent = raw_msgs[-limit:] if len(raw_msgs) > limit else raw_msgs
+
+        VALID_AI_ROLES = {"user", "assistant", "system"}
         ai_msgs = []
         for m in recent:
+            role = m["role"]
+            content = m["content"]
+            # Skip non-standard roles (e.g. system_error) that Ollama rejects
+            if role not in VALID_AI_ROLES:
+                logger.debug("Skipping message with non-AI role: %s", role)
+                continue
+            if not content or not content.strip():
+                continue
+            # Skip error placeholder messages saved as assistant role
+            meta = m.get("metadata") or {}
+            if isinstance(meta, dict) and meta.get("error"):
+                logger.debug("Skipping error placeholder message from AI context")
+                continue
             ai_msgs.append(
                 AIMessage(
-                    role=m["role"],
-                    content=m["content"],
+                    role=role,
+                    content=content,
                     timestamp=m["timestamp"],
                 )
             )
@@ -939,9 +954,20 @@ class AppController:
     def shutdown(self) -> None:
         """Clean shutdown across all HAKS subsystems."""
         if hasattr(self, "voice_engine") and self.voice_engine:
-            self.voice_engine.shutdown()
+            try:
+                self.voice_engine.shutdown()
+            except Exception as exc:
+                logger.warning("Error shutting down voice engine: %s", exc)
         if hasattr(self, "recovery_manager") and self.recovery_manager:
-            self.recovery_manager.shutdown()
+            try:
+                self.recovery_manager.shutdown()
+            except Exception as exc:
+                logger.warning("Error shutting down recovery manager: %s", exc)
+        if hasattr(self, "windows_control") and self.windows_control:
+            try:
+                self.windows_control.emergency_stop()
+            except Exception as exc:
+                logger.warning("Error stopping windows control during shutdown: %s", exc)
 
 
 _controller_instance: Optional[AppController] = None

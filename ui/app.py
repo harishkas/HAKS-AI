@@ -4,6 +4,7 @@ Configures High-DPI scaling, stylesheets, database connection validation,
 shared AppController, Main Window, Floating Assistant, and System Tray.
 """
 
+import os
 import sys
 from typing import Optional
 
@@ -44,6 +45,8 @@ class HaksApplication:
         db_manager.initialize()
 
         # 3. Qt High DPI configuration
+        os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
+        os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.window.warning=false")
         if hasattr(Qt, "HighDpiScaleFactorRoundingPolicy"):
             QApplication.setHighDpiScaleFactorRoundingPolicy(
                 Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
@@ -105,9 +108,23 @@ class HaksApplication:
         """Graceful application shutdown hook."""
         logger.info("HAKS Desktop Application shutting down gracefully.")
         if self.floating_assistant:
-            self.controller.save_floating_position(
-                self.floating_assistant.x(), self.floating_assistant.y()
-            )
+            try:
+                self.controller.save_floating_position(
+                    self.floating_assistant.x(), self.floating_assistant.y()
+                )
+                self.floating_assistant.close()
+            except Exception as exc:
+                logger.warning("Error closing floating assistant on shutdown: %s", exc)
+        if self.main_window:
+            try:
+                self.main_window.close()
+            except Exception as exc:
+                logger.warning("Error closing main window on shutdown: %s", exc)
+        if self.controller:
+            try:
+                self.controller.shutdown()
+            except Exception as exc:
+                logger.warning("Error during controller shutdown: %s", exc)
 
 
 def run_app() -> int:

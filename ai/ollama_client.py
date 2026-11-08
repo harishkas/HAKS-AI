@@ -167,6 +167,11 @@ class OllamaClient:
                 latency_ms = (time.perf_counter() - start_time) * 1000.0
 
                 content = data.get("message", {}).get("content", "")
+                if not content:
+                    logger.warning(
+                        "Ollama returned empty content. HTTP %d, model=%s, response_keys=%s",
+                        resp.status_code, model, list(data.keys()),
+                    )
                 prompt_eval_count = data.get("prompt_eval_count", 0)
                 eval_count = data.get("eval_count", 0)
 

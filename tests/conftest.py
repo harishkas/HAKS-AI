@@ -53,5 +53,4 @@ def controller(temp_workspace: AppConfig, test_db_manager: DatabaseManager) -> A
     """Fixture providing an isolated AppController."""
     ctrl = AppController(config=temp_workspace, db_manager=test_db_manager)
     yield ctrl
-    if hasattr(ctrl, "voice_engine") and ctrl.voice_engine:
-        ctrl.voice_engine.shutdown()
+    ctrl.shutdown()

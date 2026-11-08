@@ -163,7 +163,9 @@ class WindowsControlView(QWidget):
         self.metrics_timer.setInterval(3000)
         self.metrics_timer.timeout.connect(self._refresh_quick_metrics)
         if not os.environ.get("PYTEST_CURRENT_TEST"):
-            self.metrics_timer.start()
+            from PySide6.QtCore import QCoreApplication, QThread
+            if QCoreApplication.instance() is not None and QThread.currentThread().eventDispatcher() is not None:
+                self.metrics_timer.start()
 
     # --------------------------------------------------------------------------
     # 1. Dashboard Tab
@@ -1071,6 +1073,14 @@ class WindowsControlView(QWidget):
             f"Emergency stop executed! {count} active task(s) and background child processes terminated.",
         )
         self.terminal_output.append("<span style='color: #d32f2f;'>[EMERGENCY STOP EXECUTED]</span>")
+
+    def close(self) -> bool:
+        if hasattr(self, "metrics_timer") and self.metrics_timer.isActive():
+            self.metrics_timer.stop()
+        if hasattr(self, "_active_worker") and self._active_worker and self._active_worker.isRunning():
+            self._active_worker.quit()
+            self._active_worker.wait(500)
+        return super().close()
 
     def closeEvent(self, event) -> None:
         if hasattr(self, "metrics_timer") and self.metrics_timer.isActive():

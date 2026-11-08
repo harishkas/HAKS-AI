@@ -391,3 +391,14 @@ class MainWindow(QMainWindow):
         self.show()
         self.activateWindow()
         self.raise_()
+
+    def closeEvent(self, event) -> None:
+        """Handle main window close event, ensuring child timers and workers are stopped."""
+        try:
+            if hasattr(self, "page_windows_control") and self.page_windows_control:
+                self.page_windows_control.close()
+            if hasattr(self, "page_chat") and self.page_chat:
+                self.page_chat.close()
+        except Exception as exc:
+            logger.warning("Error closing main window subviews: %s", exc)
+        super().closeEvent(event)

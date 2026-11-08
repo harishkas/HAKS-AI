@@ -11,15 +11,16 @@ from typing import Optional, Any
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QApplication,
+    QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QTextEdit,
     QScrollArea,
-    QFrame,
-    QComboBox,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
 
 from ai.models import AIMessage
@@ -407,7 +408,9 @@ class ChatView(QWidget):
             except RuntimeError:
                 pass
 
-        QTimer.singleShot(50, _schedule_probe)
+        from PySide6.QtCore import QCoreApplication, QThread
+        if QCoreApplication.instance() is not None and QThread.currentThread().eventDispatcher() is not None:
+            QTimer.singleShot(50, _schedule_probe)
 
     def refresh_active_conversation(self) -> None:
         """Load messages for the currently active conversation."""
@@ -720,6 +723,23 @@ class ChatView(QWidget):
         self._finish_generation_ui()
         self.btn_retry.setVisible(False)
 
+        # Guard: handle empty AI response with diagnostic instead of saving empty message
+        if not full_text.strip():
+            engine_info = metadata.get("engine", "unknown")
+            model_info = metadata.get("model", "unknown")
+            err_display = (
+                f"⚠️ AI engine returned an empty response.\n\n"
+                f"Engine: {engine_info} | Model: {model_info}\n\n"
+                f"Try sending your message again, or check engine health "
+                f"in the AI Engine panel."
+            )
+            if self._current_streaming_lbl:
+                self._current_streaming_lbl.setText(err_display)
+                self._current_streaming_lbl.setStyleSheet("color: #ff7b72;")
+            self.btn_retry.setVisible(True)
+            logger.warning("Empty AI response received from %s (%s)", engine_info, model_info)
+            return
+
         # Persist full assistant response into conversation database
         msg_data = self.controller.send_message(full_text, role="assistant", metadata=metadata)
         self._just_finished_msg_id = msg_data["id"]
@@ -846,6 +866,12 @@ class ChatView(QWidget):
 
     def _scroll_to_bottom(self) -> None:
         """Scroll message viewport to the latest message."""
+        from PySide6.QtCore import QCoreApplication, QThread
+        if QCoreApplication.instance() is None:
+            return
+        dispatcher = QThread.currentThread().eventDispatcher()
+        if dispatcher is None:
+            return
         QTimer.singleShot(20, lambda: self.scroll_area.verticalScrollBar().setValue(
             self.scroll_area.verticalScrollBar().maximum()
         ))

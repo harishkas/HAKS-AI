@@ -382,7 +382,9 @@ class AIEngineView(QWidget):
         self._refresh_cloud_models_and_key()
 
         # Quick health probe
-        QTimer.singleShot(200, self._quick_health_probe)
+        from PySide6.QtCore import QCoreApplication, QThread
+        if QCoreApplication.instance() is not None and QThread.currentThread().eventDispatcher() is not None:
+            QTimer.singleShot(200, self._quick_health_probe)
 
     def _on_routing_policy_changed(self, index: int) -> None:
         """Persist default routing policy."""

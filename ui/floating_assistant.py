@@ -357,6 +357,17 @@ class FloatingAssistant(QWidget):
     def _on_worker_finished(self, full_text: str, metadata: dict) -> None:
         self._is_generating = False
         self.btn_send.setEnabled(True)
+
+        # Guard: handle empty AI response
+        if not full_text.strip():
+            engine_info = metadata.get("engine", "unknown")
+            model_info = metadata.get("model", "unknown")
+            self.lbl_response_preview.setText(
+                f"<b style='color:#ff7b72;'>⚠️ Empty response</b> from {engine_info} ({model_info}). Try again."
+            )
+            logger.warning("Empty AI response in FloatingAssistant from %s (%s)", engine_info, model_info)
+            return
+
         msg_data = self.controller.send_message(full_text, role="assistant", metadata=metadata)
         self._just_finished_msg_id = msg_data["id"]
 
