@@ -57,7 +57,14 @@ HAKS uses a **Modular Monolithic Architecture** with strict layer separation:
    - **Personal Memory**: Personal history, goals, preferences, and moments stored in `personal_memory.db`.
    - **Work Memory**: Technical discussions, projects, architecture, and code context in `work_memory.db`.
    - **Privacy Boundary**: Memory databases are strictly kept local, encrypted at rest via AES-256 (Fernet + PBKDF2), and NEVER transmitted to cloud AI engines.
-7. **Infrastructure & Storage**: 5 independent SQLite databases operating in WAL mode with foreign-key enforcement.
+7. **Windows Computer Control & Administrative Automation (`windows_control/`)**:
+   - `WindowsControlManager`: Central coordinator managing full-control execution, system-wide resource discovery, and hardware diagnostics.
+   - `SystemHardwareProfiler`: Genuine hardware profiler detecting CPU cores, physical RAM, genuine GPU compute limits, displays, and audio endpoints.
+   - `ResourceSafetyCheck`: Pre-flight capacity evaluator enforcing 2.0 GB disk and 1.0 GB RAM safety margins before heavy operations.
+   - `SystemResourceDiscoveryService`: Multi-drive inspection (C:, D:, E:), user directories (with OneDrive redirection support), Python runtimes, Git ecosystem, dev tools, and installed software inventory.
+   - `FilesystemService`: Permission-aware traversal (`SearchResult`), large file detection, in-place rename, cross-drive copy/move, and Recycle Bin safeguards.
+   - `CommandExecutor` & `ElevationManager`: Async CMD/PowerShell execution with streaming output, UAC administrator elevation, and immutable redacted audit logging in `settings.db`.
+8. **Infrastructure & Storage**: 5 independent SQLite databases operating in WAL mode with foreign-key enforcement.
 
 ---
 
@@ -167,9 +174,31 @@ HAKS/
 │       ├── personal_memory_view.py    # Isolated Personal Memory browser & proposal approval
 │       ├── work_memory_view.py        # Isolated Work Memory browser & project organizer
 │       ├── voice_view.py              # Voice pipeline state visualizer
+│       ├── windows_control_view.py    # Windows Computer Control dashboard & command center
 │       └── settings_view.py           # Application settings, storage migration, backups & themes
 │
-├── tests/                             # Automated test suite (126 tests)
+├── windows_control/                   # Phase 7 Windows Computer Control & Discovery
+│   ├── __init__.py                    # Public exports
+│   ├── models.py                      # ActionPlan, CommandResult, HardwareProfile, SafetyCheck, SearchResult
+│   ├── hardware_profiler.py           # Genuine hardware profiling & operation capacity evaluation
+│   ├── resource_discovery.py          # System-wide discovery (drives, user dirs, tools, runtimes, apps)
+│   ├── filesystem_service.py          # Multi-drive operations, permission-aware traversal, Recycle Bin
+│   ├── manager.py                     # WindowsControlManager central coordinator
+│   ├── command_executor.py            # Async subprocess executor with streaming callbacks
+│   ├── elevation_manager.py           # Windows UAC elevation via runas & Named Pipe IPC
+│   ├── execution_policy.py            # Risk tiers (LOW, SENSITIVE, DESTRUCTIVE, BLOCKED)
+│   ├── command_interpreter.py         # Bilingual (English & Tamil) natural language command interpreter
+│   ├── audit_logger.py                # Immutable redacted audit log in settings.db
+│   ├── process_manager.py             # Process enumeration, termination, and critical OS protection
+│   ├── application_manager.py         # Application registry lookups and launcher
+│   ├── software_manager.py            # Winget, pip, and installer command builders
+│   ├── download_manager.py            # Multi-threaded file downloads with SHA-256 verification
+│   ├── gui_automation.py              # Native pywinauto / ctypes desktop GUI automation
+│   ├── cmd_service.py                 # Streaming CMD shell service
+│   ├── powershell_service.py          # Streaming PowerShell 5.1/7+ shell service
+│   └── system_manager.py              # Network ping, port test, services, and hardware specs
+│
+├── tests/                             # Automated test suite (161 tests)
 │   ├── __init__.py
 │   ├── conftest.py                    # Pytest fixtures (headless Qt & isolated storage)
 │   ├── test_config.py                 # Configuration tests
@@ -191,7 +220,9 @@ HAKS/
 │   ├── test_personal_and_work_memory_managers.py # CRUD, domain isolation, encrypted backup/restore tests
 │   ├── test_storage_architecture.py   # Persistent OS storage, domain exports, wiping, migration tests
 │   ├── test_privacy_and_routing.py    # Phase 5 hybrid router, classifiers, consent & redactor tests
-│   └── test_voice_architecture.py     # Phase 6 VAD, wake word, Faster-Whisper, TTS router, & continuous engine tests
+│   ├── test_voice_architecture.py     # Phase 6 VAD, wake word, Faster-Whisper, TTS router, & continuous engine tests
+│   ├── test_windows_control.py        # Phase 7 full control, UAC elevation, shell, & audit tests (19 tests)
+│   └── test_system_wide_windows_control.py # System-wide discovery, hardware profiler & capacity tests (16 tests)
 │
 ├── logs/                              # Application log files (git-ignored)
 └── data/                              # SQLite databases (git-ignored)
