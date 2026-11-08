@@ -56,6 +56,7 @@ class AIEngineRouter:
         user_prompt: str,
         mode: RoutingMode = RoutingMode.AUTO,
         retrieved_memory_context: str = "",
+        is_online: Optional[bool] = None,
     ) -> RoutingDecision:
         """Evaluate prompt and memory context to produce an authoritative routing decision."""
         # 1. Classify prompt and combined context privacy
@@ -139,7 +140,13 @@ class AIEngineRouter:
         fallback_engine = None
         fallback_reason = None
 
-        if not is_available:
+        if target_engine == "cloud" and is_online is False:
+            is_available = False
+            avail_msg = "Internet connection is offline. Cloud requests cannot be sent."
+            is_fallback_needed = True
+            fallback_engine = "local"
+            fallback_reason = "System is offline. Cloud AI is unavailable without internet connectivity."
+        elif not is_available:
             is_fallback_needed = True
             fallback_engine = "local" if target_engine == "cloud" else "cloud"
             fallback_reason = f"Target engine '{target_engine}' is unavailable: {avail_msg}."

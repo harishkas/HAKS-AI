@@ -70,6 +70,13 @@ class ApplicationEvents(QObject):
     windows_download_progress = Signal(dict)  # (download_item_dict)
     windows_emergency_stop_triggered = Signal()
 
+    # Phase 8 Offline Operation & Disaster Recovery signals
+    network_connectivity_changed = Signal(bool)  # is_online
+    backup_completed = Signal(dict)  # (backup_manifest_dict)
+    backup_failed = Signal(str)  # (error_message)
+    recovery_operation_completed = Signal(dict)  # (recovery_report_dict)
+    database_health_changed = Signal(dict)  # (database_health_dict)
+
 
 # Singleton instance
 _events_instance: Optional[ApplicationEvents] = None

@@ -65,6 +65,22 @@ class LanguageAwareTTSRouter:
             voices.extend(self.piper_engine.list_voices())
         return voices
 
+    @staticmethod
+    def is_engine_offline(engine_name: str) -> bool:
+        """Explicitly distinguish offline TTS engines from internet-dependent engines."""
+        return engine_name.lower() in ("sapi", "sapi5", "piper", "pyttsx3")
+
+    @staticmethod
+    def get_engine_network_requirement(engine_name: str) -> str:
+        """Return human-readable network requirement description."""
+        if engine_name.lower() in ("edge", "edge_tts"):
+            return "Online Only (Microsoft Edge Cloud Neural TTS)"
+        elif engine_name.lower() in ("sapi", "sapi5"):
+            return "100% Offline (Windows SAPI5 Desktop Speech)"
+        elif engine_name.lower() == "piper":
+            return "100% Offline (Local ONNX Piper Engine)"
+        return "Unknown"
+
     async def synthesize(
         self,
         text: str,
@@ -72,6 +88,7 @@ class LanguageAwareTTSRouter:
         voice_override: Optional[str] = None,
         speed: Optional[float] = None,
         volume: Optional[float] = None,
+        is_offline: bool = False,
     ) -> SpokenUtterance:
         """Synthesize text using the best engine for the language and configuration."""
         clean_text = text.strip()
@@ -113,8 +130,8 @@ class LanguageAwareTTSRouter:
                 audio_path=str(res_path),
             )
 
-        # 3. Default / Auto: Prefer Edge Neural TTS for Tamil and English
-        if self.edge_engine.is_available():
+        # 3. Default / Auto: Prefer Edge Neural TTS only when NOT offline
+        if not is_offline and self.edge_engine.is_available():
             try:
                 # Select appropriate voice based on Tamil presence
                 voice = voice_override

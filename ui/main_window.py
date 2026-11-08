@@ -31,6 +31,7 @@ from ui.views.work_memory_view import WorkMemoryView
 from ui.views.voice_view import VoiceView
 from ui.views.ai_engine_view import AIEngineView
 from ui.views.windows_control_view import WindowsControlView
+from ui.views.recovery_view import RecoveryView
 from ui.views.settings_view import SettingsView
 
 logger = get_logger("ui.main_window")
@@ -95,6 +96,7 @@ class MainWindow(QMainWindow):
         self.page_voice = VoiceView(self.controller)
         self.page_ai_engine = AIEngineView(self.controller)
         self.page_windows_control = WindowsControlView(self.controller)
+        self.page_recovery = RecoveryView(self.controller)
         self.page_settings = SettingsView(self.controller)
 
         self.content_stack.addWidget(self.page_home)            # Index 0
@@ -105,7 +107,8 @@ class MainWindow(QMainWindow):
         self.content_stack.addWidget(self.page_voice)           # Index 5
         self.content_stack.addWidget(self.page_ai_engine)       # Index 6
         self.content_stack.addWidget(self.page_windows_control) # Index 7
-        self.content_stack.addWidget(self.page_settings)        # Index 8
+        self.content_stack.addWidget(self.page_recovery)        # Index 8
+        self.content_stack.addWidget(self.page_settings)        # Index 9
 
         main_layout.addWidget(self.content_stack)
         root_layout.addWidget(main_area)
@@ -139,7 +142,8 @@ class MainWindow(QMainWindow):
             ("voice", "Voice Assistant", 5),
             ("ai_engine", "AI Engine", 6),
             ("control", "Computer Control", 7),
-            ("settings", "Settings", 8),
+            ("recovery", "Backup & Recovery", 8),
+            ("settings", "Settings", 9),
         ]
 
         for nav_id, label, index in nav_items:
@@ -175,6 +179,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.lbl_page_title)
 
         layout.addStretch()
+
+        # Network Connectivity Badge
+        self.badge_network = QLabel("Online" if self.controller.is_online() else "Offline")
+        self.badge_network.setProperty("class", "status_badge badge_online" if self.controller.is_online() else "status_badge badge_offline")
+        layout.addWidget(self.badge_network)
 
         # Engine Badge
         self.badge_engine = QLabel("Engine: Local Ollama (Standby)")
@@ -330,11 +339,22 @@ class MainWindow(QMainWindow):
         """Connect application event bus to UI slots."""
         self.events.status_message_updated.connect(self._update_status_message)
         self.events.voice_state_changed.connect(self._update_voice_badge)
+        self.events.network_connectivity_changed.connect(self._update_network_badge)
         self.events.navigate_to_page.connect(self._on_external_navigate)
         self.events.show_main_window_requested.connect(self._on_show_requested)
 
     def _update_status_message(self, message: str) -> None:
         self.lbl_status.setText(message)
+
+    def _update_network_badge(self, is_online: bool) -> None:
+        if is_online:
+            self.badge_network.setText("Online")
+            self.badge_network.setProperty("class", "status_badge badge_online")
+        else:
+            self.badge_network.setText("Offline")
+            self.badge_network.setProperty("class", "status_badge badge_offline")
+        self.badge_network.style().unpolish(self.badge_network)
+        self.badge_network.style().polish(self.badge_network)
 
     def _update_voice_badge(self, state: str) -> None:
         self.badge_voice.setText(f"Voice: {state}")
@@ -355,7 +375,8 @@ class MainWindow(QMainWindow):
             "voice": 5,
             "ai_engine": 6,
             "control": 7,
-            "settings": 8,
+            "recovery": 8,
+            "settings": 9,
         }
         if page_id in nav_map:
             self._on_navigate(page_id, nav_map[page_id], notify_event_bus=False)

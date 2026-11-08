@@ -64,7 +64,12 @@ HAKS uses a **Modular Monolithic Architecture** with strict layer separation:
    - `SystemResourceDiscoveryService`: Multi-drive inspection (C:, D:, E:), user directories (with OneDrive redirection support), Python runtimes, Git ecosystem, dev tools, and installed software inventory.
    - `FilesystemService`: Permission-aware traversal (`SearchResult`), large file detection, in-place rename, cross-drive copy/move, and Recycle Bin safeguards.
    - `CommandExecutor` & `ElevationManager`: Async CMD/PowerShell execution with streaming output, UAC administrator elevation, and immutable redacted audit logging in `settings.db`.
-8. **Infrastructure & Storage**: 5 independent SQLite databases operating in WAL mode with foreign-key enforcement.
+8. **Offline Operation & Disaster Recovery (`recovery/`)**:
+   - `NetworkMonitor`: Ultra-lightweight asynchronous socket probe monitoring internet reachability without DNS pollution.
+   - `EnhancedBackupService`: Multi-database, config, and vector index archive packaging with Fernet encryption, SHA-256 integrity verification, retention pruning, and external drive mirroring.
+   - `DisasterRecoveryService`: Automatic SQLite `PRAGMA integrity_check`, self-healing vector index reconstruction from SQLite tables, corrupted database quarantine (`quarantine/`), and pre-recovery safety snapshots.
+   - `OfflineRecoveryManager`: Central coordinator managing local Ollama discovery, offline voice readiness, and offline AI routing protection.
+9. **Infrastructure & Storage**: 5 independent SQLite databases operating in WAL mode with foreign-key enforcement.
 
 ---
 
@@ -153,6 +158,14 @@ HAKS/
 │       ├── piper_tts_engine.py        # Local ONNX Piper TTS adapter
 │       └── router.py                  # LanguageAwareTTSRouter (Unicode Tamil vs English script)
 │
+├── recovery/                          # Phase 8 Offline Operation & Disaster Recovery
+│   ├── __init__.py                    # Public recovery exports
+│   ├── models.py                      # NetworkStatus, HealthOverview, BackupManifest, IntegrityReport
+│   ├── network_monitor.py             # Real-time socket connectivity probe (1.1.1.1:53 / 8.8.8.8:53)
+│   ├── backup_service.py              # Full-system AES-256 encrypted backups, SHA-256 manifests, retention policy
+│   ├── disaster_recovery.py           # SQLite PRAGMA integrity checks, self-healing vector index rebuild, quarantine
+│   └── offline_manager.py             # Central facade coordinating network, offline AI & voice diagnostics
+│
 ├── storage/                           # SQLite database & persistence framework
 │   ├── __init__.py
 │   ├── database.py                    # Connection management, WAL mode, transaction sessions
@@ -175,6 +188,7 @@ HAKS/
 │       ├── work_memory_view.py        # Isolated Work Memory browser & project organizer
 │       ├── voice_view.py              # Voice pipeline state visualizer
 │       ├── windows_control_view.py    # Windows Computer Control dashboard & command center
+│       ├── recovery_view.py           # Phase 8 Backup, Database Health & Disaster Recovery view
 │       └── settings_view.py           # Application settings, storage migration, backups & themes
 │
 ├── windows_control/                   # Phase 7 Windows Computer Control & Discovery
@@ -198,7 +212,7 @@ HAKS/
 │   ├── powershell_service.py          # Streaming PowerShell 5.1/7+ shell service
 │   └── system_manager.py              # Network ping, port test, services, and hardware specs
 │
-├── tests/                             # Automated test suite (161 tests)
+├── tests/                             # Automated test suite (176 tests)
 │   ├── __init__.py
 │   ├── conftest.py                    # Pytest fixtures (headless Qt & isolated storage)
 │   ├── test_config.py                 # Configuration tests
@@ -222,7 +236,8 @@ HAKS/
 │   ├── test_privacy_and_routing.py    # Phase 5 hybrid router, classifiers, consent & redactor tests
 │   ├── test_voice_architecture.py     # Phase 6 VAD, wake word, Faster-Whisper, TTS router, & continuous engine tests
 │   ├── test_windows_control.py        # Phase 7 full control, UAC elevation, shell, & audit tests (19 tests)
-│   └── test_system_wide_windows_control.py # System-wide discovery, hardware profiler & capacity tests (16 tests)
+│   ├── test_system_wide_windows_control.py # System-wide discovery, hardware profiler & capacity tests (16 tests)
+│   └── test_offline_and_recovery.py   # Phase 8 Offline AI, backup, integrity, quarantine & recovery tests (15 tests)
 │
 ├── logs/                              # Application log files (git-ignored)
 └── data/                              # SQLite databases (git-ignored)
@@ -322,13 +337,13 @@ cd "c:\Users\Admin\Music\HAKS AI"
 pip install -r requirements.txt
 ```
 
-### 3. Running the Test Suite (161 Tests)
+### 3. Running the Test Suite (176 Tests)
 ```powershell
 .\.venv\Scripts\pytest.exe
 ```
 Output:
 ```
-============================ 161 passed in 52.05s =============================
+============================ 176 passed in 59.80s =============================
 ```
 
 ### 4. Running the Smoke Test
@@ -374,6 +389,37 @@ HAKS functions as an intelligent Windows desktop operator with full hardware awa
 
 ---
 
+## Phase 8: Offline Operation & Disaster Recovery
+
+HAKS is architected to operate with complete resilience during internet outages, cloud service degradation, unexpected shutdowns, and database corruption.
+
+### 1. Offline AI Operation & Routing Protection
+- **Real-Time Network Monitoring**: `NetworkMonitor` performs non-blocking, zero-DNS-pollution TCP socket connectivity checks to `1.1.1.1:53` and `8.8.8.8:53`. Network state transitions trigger UI badge updates and route re-evaluations.
+- **Strict Cloud Protection**: When offline, the `HybridAIRouter` refuses to dispatch requests to cloud providers, preventing network socket hangs or API leakage.
+- **Zero Silent Fallback**: As established in Phase 5, if a user requests a cloud engine while offline, HAKS presents an explicit, non-silent fallback proposition (`is_fallback_needed=True`) prompting the user to run on local Ollama instead of silently changing engines.
+- **Local Ollama Model Auto-Discovery**: HAKS queries the local Ollama daemon (`http://127.0.0.1:11434/api/tags`) to inspect pulled models and verify local offline generation capability.
+
+### 2. Offline Continuous Voice Operation
+- **Offline Wake Word**: Dual-engine wake detector with offline acoustic energy and fricative burst detection operates without network access.
+- **Offline VAD**: Dynamic noise-tracking Voice Activity Detector operates entirely in-memory using local mathematical root-mean-square and spectral analysis.
+- **Offline STT**: `FasterWhisperSTT` executes quantized INT8 bilingual models directly on the CPU using AVX2 instructions without external server calls.
+- **Offline TTS vs. Cloud Neural TTS Distinction**: Edge Neural TTS (`ta-IN-PallaviNeural`, `en-US-JennyNeural`) requires an internet connection. When offline, HAKS automatically skips network TTS calls to prevent latency timeouts and speaks immediately through local Windows SAPI5 (`pyttsx3`) or Piper ONNX models.
+
+### 3. Unified Backup & Retention Management
+- **Full-System Backups (`.haksbackup` / `.zip`)**: Multi-domain archives bundling all 5 SQLite databases (`personal_memory.db`, `work_memory.db`, `conversations.db`, `memory_proposals.db`, `settings.db`), vector search indexes (`index.json`), and application configuration.
+- **AES-256 Fernet Encryption**: Backups are encrypted at rest with PBKDF2 key derivation and SHA-256 manifest integrity verification. Encryption keys are never bundled inside the backup archive.
+- **Retention Policies**: Configurable retention limits (keep last $N$ backups, maximum backup age in days) with an absolute invariant: the last remaining healthy backup is never deleted.
+- **External Drive Mirroring**: Configurable secondary backup paths (e.g., external HDDs, USB storage, SD cards) with automatic dual-write synchronization.
+
+### 4. Disaster Recovery & Self-Healing
+- **SQLite Database Integrity Audits**: Startup and on-demand `PRAGMA integrity_check` and `PRAGMA quick_check` across all databases with automatic WAL checkpointing.
+- **Vector Index Self-Healing**: Automatically reconstructs 384-dimensional semantic search indexes directly from canonical SQLite memory records if vector index files are missing or out of sync.
+- **Corrupted Database Quarantine**: Any unrecoverable database is immediately moved to `quarantine/<domain>_corrupted_<timestamp>/` to preserve evidence before fresh reconstruction.
+- **Pre-Recovery Safety Snapshots**: Before restoring or migrating data, HAKS creates an automatic immutable pre-recovery snapshot ensuring zero accidental data loss.
+- **Unclean Shutdown Detection**: Tracks active sessions via `.session_lock.json`. Crashes or power cuts are detected on next boot, triggering health verification and automatic repair.
+
+---
+
 ## Release Status & Roadmap
 
 - [x] **Phase 1 — Foundation** (Configuration, Logging, SQLite WAL Databases, Basic PySide6 UI)
@@ -383,5 +429,5 @@ HAKS functions as an intelligent Windows desktop operator with full hardware awa
 - [x] **Phase 5 — Intelligent AI Routing & Privacy Management** (Hybrid rule + lightweight classifier, deterministic privacy policies, consent manager, data redactor, fallback confirmation)
 - [x] **Phase 6 — Advanced Bilingual Voice Assistant** (Real-time sounddevice capture, dynamic VAD, "Hey HAKS" wake word, Faster-Whisper CPU int8 STT, multi-engine Edge/SAPI TTS router, barge-in interruption, continuous state machine)
 - [x] **Phase 7 — Windows Computer Control & Administrative Automation** (Full control mode, on-demand Windows UAC elevation, CMD/PowerShell streaming, system-wide multi-drive discovery & search, hardware profiler & capacity guards, process manager, software & download management with SHA-256 validation, natural language interpreter [English + Tamil], immutable audit log with secret redaction, emergency stop, and Control Center UI)
-- [ ] **Phase 8 — Offline & Disaster Recovery** (Automated backups, integrity validation)
+- [x] **Phase 8 — Offline Operation & Disaster Recovery** (Real-time network monitoring, offline AI routing guards, offline voice readiness, multi-engine TTS router distinction, full-system AES-256 encrypted backups, retention policy pruning, external drive mirroring, SQLite PRAGMA integrity verification, self-healing vector index rebuild, corrupted database quarantine, pre-recovery safety snapshots, and Recovery Center UI)
 - [ ] **Phase 9 — Packaging & Release 0.1** (PyInstaller packaging, final verification)

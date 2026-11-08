@@ -264,6 +264,7 @@ class WindowsControlManager:
             "cpu_usage_percent": hw.cpu_usage_percent,
             "ram_total_gb": hw.ram_total_gb,
             "ram_available_gb": hw.ram_available_gb,
+            "ram_used_gb": round(hw.ram_total_gb - hw.ram_available_gb, 2),
             "ram_percent": hw.ram_used_percent,
             "uptime_seconds": hw.system_uptime_seconds,
             "drives": [d.model_dump() for d in drives],

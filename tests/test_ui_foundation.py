@@ -30,8 +30,8 @@ def test_main_window_structure_and_navigation(qapp, temp_workspace: AppConfig):
     assert window.minimumWidth() >= temp_workspace.ui.min_window_width
     assert window.minimumHeight() >= temp_workspace.ui.min_window_height
 
-    # Verify content stack has 9 pages
-    assert window.content_stack.count() == 9
+    # Verify content stack has 10 pages
+    assert window.content_stack.count() == 10
 
     # Verify navigation buttons
     expected_nav_ids = [
@@ -43,6 +43,7 @@ def test_main_window_structure_and_navigation(qapp, temp_workspace: AppConfig):
         "voice",
         "ai_engine",
         "control",
+        "recovery",
         "settings",
     ]
     for nav_id in expected_nav_ids:

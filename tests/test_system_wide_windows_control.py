@@ -23,6 +23,7 @@ from windows_control.manager import WindowsControlManager
 from windows_control.models import (
     CompleteHardwareProfile,
     DriveInfo,
+    RAMInfo,
     ResourceSafetyCheck,
     SearchResult,
     SystemDiscoveryReport,
@@ -75,9 +76,17 @@ def test_hardware_profiler_gpu_evaluation():
             assert "cpu" in gpu.acceleration_notes.lower() or "quantized" in gpu.acceleration_notes.lower() or "not supported" in gpu.acceleration_notes.lower()
 
 
-def test_hardware_profiler_safety_check_pass():
+def test_hardware_profiler_safety_check_pass(monkeypatch):
     """Verify capacity evaluation passes for modest operations with sufficient resources."""
     profiler = SystemHardwareProfiler()
+
+    # Guarantee healthy RAM availability in test environment regardless of host memory load
+    monkeypatch.setattr(profiler, "detect_ram", lambda: RAMInfo(
+        total_gb=8.0,
+        available_gb=3.0,
+        used_gb=5.0,
+        percent_used=62.5,
+    ))
 
     # Small operation (10 MB disk, 50 MB RAM, no GPU required)
     safety = profiler.evaluate_operation_capacity(

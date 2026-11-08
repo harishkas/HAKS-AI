@@ -187,6 +187,19 @@ class WindowsControlConfig(BaseModel):
     audit_retention_days: int = 90
 
 
+class RecoveryConfig(BaseModel):
+    """Offline operation and disaster recovery configuration."""
+
+    offline_mode: bool = False
+    backup_retention_count: int = 10
+    backup_retention_days: int = 30
+    auto_backup_enabled: bool = True
+    auto_backup_interval_hours: int = 24
+    external_backup_dir: Optional[str] = None
+    verify_checksums_on_restore: bool = True
+    check_integrity_on_startup: bool = True
+
+
 class AppConfig(BaseModel):
     """Root Application Configuration."""
 
@@ -198,6 +211,7 @@ class AppConfig(BaseModel):
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     control: WindowsControlConfig = Field(default_factory=WindowsControlConfig)
+    recovery: RecoveryConfig = Field(default_factory=RecoveryConfig)
 
 
 AppConfig.model_rebuild()

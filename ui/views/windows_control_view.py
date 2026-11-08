@@ -288,9 +288,10 @@ class WindowsControlView(QWidget):
         self.bar_cpu.setValue(cpu_pct)
         self.lbl_cpu.setText(f"CPU Usage: {cpu_pct}%")
 
-        ram_pct = int(data["ram_percent"])
+        ram_pct = int(data.get("ram_percent", 0))
         self.bar_ram.setValue(ram_pct)
-        self.lbl_ram.setText(f"RAM Usage: {data['ram_used_gb']} GB / {data['ram_total_gb']} GB ({ram_pct}%)")
+        ram_used = data.get("ram_used_gb", round(data.get("ram_total_gb", 8.0) - data.get("ram_available_gb", 0.0), 2))
+        self.lbl_ram.setText(f"RAM Usage: {ram_used} GB / {data.get('ram_total_gb', 8.0)} GB ({ram_pct}%)")
 
         # Drives cards
         while self.drives_layout.count():

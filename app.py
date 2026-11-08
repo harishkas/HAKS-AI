@@ -7,6 +7,7 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 
 from config.settings import get_settings
@@ -124,11 +125,36 @@ def main() -> int:
         assert hasattr(win, "page_windows_control")
         logger.info("Phase 7 Windows Computer Control verified: interpreter (English+Tamil), policy, hardware profiler, and UI.")
 
-        controller.voice_engine.shutdown()
+        # 8. Test Phase 8 Offline Operation & Disaster Recovery Subsystems
+        rm = controller.get_recovery_manager()
+        assert rm is not None
+        assert isinstance(rm.is_online, bool)
+        # Verify SQLite integrity check
+        db_integrity = rm.run_integrity_check()
+        assert len(db_integrity) == 5
+        assert all(st.is_healthy for st in db_integrity.values())
+        # Verify full backup creation and verification
+        bk_path = rm.create_full_backup(encrypt=True, notes="Smoke test backup")
+        assert bk_path.exists()
+        v_res = rm.backup.verify_backup(bk_path)
+        assert v_res.is_valid is True
+        assert v_res.verified_files_count >= 5
+        # Verify Offline AI & Voice indicators
+        voice_offline = rm.get_voice_offline_status()
+        assert voice_offline["wake_word_offline"] is True
+        assert voice_offline["tts_edge_neural_online_only"] is True
+        assert voice_offline["tts_sapi_offline"] is True
+        assert hasattr(win, "page_recovery")
+        logger.info("Phase 8 Offline Operation & Disaster Recovery verified: integrity, encrypted backups, SHA-256 verification, and offline voice readiness.")
+
+        controller.shutdown()
         win.close()
         floating.close()
+        win.deleteLater()
+        floating.deleteLater()
+        qapp.processEvents()
         logger.info("HAKS Release 0.1 Smoke test passed successfully across all phases!")
-        return 0
+        os._exit(0)
 
     # Normal execution
     app = HaksApplication(config)

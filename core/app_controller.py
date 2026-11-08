@@ -80,6 +80,16 @@ class AppController:
         from windows_control.manager import WindowsControlManager
         self.windows_control = WindowsControlManager(config=self.config, db_manager=self.db)
 
+        # Phase 8 Offline Operation & Disaster Recovery Subsystem
+        from recovery.offline_manager import OfflineRecoveryManager
+        self.recovery_manager = OfflineRecoveryManager(
+            config=self.config,
+            db_manager=self.db,
+            encryption_service=self.personal_memory.encryption,
+            events=self.events,
+        )
+        self.recovery_manager.initialize_on_startup()
+
         logger.info("AppController initialized. Current theme: %s", self._current_theme)
 
     # --------------------------------------------------------------------------
@@ -400,10 +410,12 @@ class AppController:
         """Compute an authoritative routing decision using the AIEngineRouter."""
         effective_mode = mode or self.get_routing_mode()
         router = self.get_router()
+        is_online = self.recovery_manager.is_online if hasattr(self, "recovery_manager") else True
         return router.route(
             user_prompt=user_prompt,
             mode=effective_mode,
             retrieved_memory_context=memory_context,
+            is_online=is_online,
         )
 
     def get_conversation_ai_messages(self, conv_id: Optional[str] = None, limit: int = 20) -> list[Any]:
@@ -874,6 +886,62 @@ class AppController:
     def list_system_drives(self) -> Any:
         """List all detected Windows drives with capacity and status."""
         return self.windows_control.list_system_drives()
+
+    # --------------------------------------------------------------------------
+    # Phase 8 Offline Operation & Disaster Recovery Integration
+    # --------------------------------------------------------------------------
+
+    def get_recovery_manager(self) -> Any:
+        """Return the OfflineRecoveryManager subsystem."""
+        return self.recovery_manager
+
+    def is_online(self) -> bool:
+        """Return current network reachability."""
+        return self.recovery_manager.is_online
+
+    def create_full_backup(self, encrypt: bool = True, notes: str = "") -> Path:
+        """Create a complete full-system backup bundle."""
+        return self.recovery_manager.create_full_backup(encrypt=encrypt, notes=notes)
+
+    def restore_full_backup(
+        self,
+        backup_path: Path,
+        target_dir: Optional[Path] = None,
+        preserve_current: bool = True,
+    ) -> Any:
+        """Restore full system from backup with pre-recovery snapshot safeguard."""
+        res = self.recovery_manager.restore_system(
+            backup_path=backup_path,
+            target_dir=target_dir,
+            preserve_current=preserve_current,
+        )
+        if res.success and target_dir is None:
+            # Refresh internal domain managers
+            self.personal_memory = PersonalMemoryManager(self.config, self.db)
+            self.work_memory = WorkMemoryManager(self.config, self.db)
+            self.events.memory_domain_updated.emit("all")
+        return res
+
+    def run_system_integrity_check(self) -> dict[str, Any]:
+        """Perform comprehensive SQLite integrity verification across all 5 databases."""
+        return self.recovery_manager.run_integrity_check()
+
+    def rebuild_all_vector_indexes(self) -> dict[str, Any]:
+        """Verify and self-heal memory vector indexes from SQLite records."""
+        res = self.recovery_manager.rebuild_vector_indexes()
+        self.events.memory_domain_updated.emit("all")
+        return res
+
+    def get_system_health_overview(self) -> Any:
+        """Return comprehensive health summary for UI."""
+        return self.recovery_manager.get_system_health_overview()
+
+    def shutdown(self) -> None:
+        """Clean shutdown across all HAKS subsystems."""
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            self.voice_engine.shutdown()
+        if hasattr(self, "recovery_manager") and self.recovery_manager:
+            self.recovery_manager.shutdown()
 
 
 _controller_instance: Optional[AppController] = None
