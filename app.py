@@ -82,9 +82,14 @@ def main() -> int:
         logger.info("FloatingAssistant instantiated: %dx%d at pos (%d, %d)",
                     floating.width(), floating.height(), floating.x(), floating.y())
 
-        # Test message dispatching through shared controller
+        # Test message dispatching through shared controller without polluting persistent session
+        orig_conv = controller.get_active_conversation_id()
+        temp_conv_id = controller.create_new_conversation(title="[Smoke Test Session]")
         msg = controller.send_message("Phase 2 UI smoke test message", role="user")
         logger.info("Message dispatched via shared controller: %s", msg["id"])
+        controller.delete_conversation(temp_conv_id)
+        if orig_conv and orig_conv != temp_conv_id:
+            controller.select_conversation(orig_conv)
 
         # 4. Test AI Engine Manager initialization
         ai_mgr = controller.get_ai_manager()

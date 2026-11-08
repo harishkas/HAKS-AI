@@ -32,6 +32,27 @@ TAMIL_APP_MAP = {
     "பெயின்ட்": "mspaint",
 }
 
+APP_ALIAS_MAP = {
+    "note pad": "notepad",
+    "notepad": "notepad",
+    "camera": "start microsoft.windows.camera:",
+    "webcam": "start microsoft.windows.camera:",
+    "calculator": "calc",
+    "calc": "calc",
+    "terminal": "wt",
+    "command prompt": "cmd",
+    "cmd": "cmd",
+    "browser": "start msedge",
+    "chrome": "start chrome",
+    "edge": "start msedge",
+    "file explorer": "explorer",
+    "explorer": "explorer",
+    "files": "explorer",
+    "task manager": "taskmgr",
+    "paint": "mspaint",
+    "settings": "start ms-settings:",
+}
+
 
 class CommandInterpreter:
     """Translates user natural-language queries into validated ActionPlans."""
@@ -42,12 +63,19 @@ class CommandInterpreter:
     def interpret(self, user_instruction: str, source: str = "chat", working_dir: Optional[str] = None) -> ActionPlan:
         """Parse natural-language request into an executable ActionPlan."""
         text = user_instruction.strip()
+        # Strip wake-word / conversational assistant address if present (e.g., "Hey HAKS, open notepad" -> "open notepad")
+        stripped = re.sub(r"^(?:hey|hi|hello)?\s*haks[\s,:\-]+", "", text, flags=re.IGNORECASE).strip()
+        if stripped:
+            text = stripped
         lower = text.lower()
         cwd = working_dir or os.getcwd()
 
-        # 0. Check conversational requests first (e.g. general questions)
-        question_words = ("what is", "what are", "who is", "who are", "tell me", "explain", "how do", "how to", "why is", "why does", "when is", "hello", "hi", "hey", "வணக்கம்", "யார்", "என்ன", "எப்படி")
-        if any(lower.startswith(qw) for qw in question_words) or lower.endswith("?"):
+        # 0. Check conversational requests first (e.g. general questions or standalone greetings)
+        question_words = ("what is", "what are", "who is", "who are", "tell me", "explain", "how do", "how to", "why is", "why does", "when is", "யார்", "என்ன", "எப்படி")
+        standalone_greetings = ("hello", "hi", "hey", "வணக்கம்")
+        is_greeting = any(lower == g or lower.startswith(f"{g} ") and not any(cmd in lower for cmd in ("open", "launch", "start", "run", "close", "kill", "restart", "shutdown", "install", "check", "திற")) for g in standalone_greetings)
+
+        if any(lower.startswith(qw) for qw in question_words) or lower.endswith("?") or is_greeting:
             return ActionPlan(
                 objective="General Conversation Query",
                 target="AI Assistant",
@@ -124,19 +152,21 @@ class CommandInterpreter:
         app_match = re.search(r"\b(open|launch|start|திற)\s+([a-zA-Z0-9_\-\s]+)", text, re.IGNORECASE)
         if app_match and not any(k in lower for k in ("pip", "file", "folder", "dependency", "dependencies", "repo", "git")):
             target_app = app_match.group(2).strip()
-            for noise in ("please", "for me", "now", "app", "application"):
-                target_app = re.sub(rf"\b{noise}\b", "", target_app, flags=re.IGNORECASE).strip()
+            for noise in ("the", "a", "an", "please", "for me", "now", "app", "application"):
+                target_app = re.sub(rf"^\b{noise}\b|\b{noise}\b$", "", target_app, flags=re.IGNORECASE).strip()
 
-            target_app = TAMIL_APP_MAP.get(target_app, target_app)
+            canonical_target = APP_ALIAS_MAP.get(target_app.lower(), TAMIL_APP_MAP.get(target_app, target_app))
+            command_str = canonical_target
+            display_target = target_app
             return ActionPlan(
-                objective=f"Open {target_app}",
-                target=target_app,
+                objective=f"Open {display_target}",
+                target=display_target,
                 operation_type="launch_app",
-                command=target_app,
+                command=command_str,
                 working_dir=cwd,
                 privilege_level=PrivilegeLevel.NORMAL,
                 risk_level=RiskLevel.LOW,
-                expected_outcome=f"Launches {target_app} on the desktop.",
+                expected_outcome=f"Launches {display_target} on the desktop.",
                 source=source,
             )
 

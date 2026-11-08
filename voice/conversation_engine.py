@@ -391,11 +391,8 @@ class ContinuousVoiceEngine:
             # 4. Integrate with Shared Controller, AI Routing, & Memory Architecture
             response_text = await self._generate_ai_response(text)
             if not response_text:
-                logger.warning(
-                    "AI engine returned empty response for voice prompt (engine=%s). Showing fallback.",
-                    engine_type,
-                )
-                response_text = "I processed your request, but received an empty response."
+                logger.warning("Empty response received for voice prompt.")
+                response_text = "I'm listening, but I didn't get a response from the AI engine. How can I help you?"
 
             self._last_spoken_response = response_text
 
@@ -525,15 +522,20 @@ class ContinuousVoiceEngine:
                 messages=messages,
                 engine_type=engine_type,
             )
-            resp_content = response.content.strip()
+            resp_content = response.content.strip() if response and response.content else ""
 
-            # Record assistant turn in database
-            self.controller.send_message(
-                resp_content,
-                role="assistant",
-                metadata={"engine": engine_type, "model": response.model},
-            )
-            return resp_content
+            if resp_content:
+                # Record assistant turn in database
+                self.controller.send_message(
+                    resp_content,
+                    role="assistant",
+                    metadata={"engine": engine_type, "model": response.model},
+                )
+                return resp_content
+            else:
+                fallback_msg = "I'm listening, but I didn't get a response from the AI engine. How can I help you?"
+                logger.warning("AI engine returned empty content for voice prompt (engine=%s)", engine_type)
+                return fallback_msg
         except Exception as gen_exc:
             err_msg = f"I encountered an error generating a response: {gen_exc}"
             logger.error("AI Generation failed for voice turn: %s", gen_exc)

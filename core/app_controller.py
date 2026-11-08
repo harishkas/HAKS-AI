@@ -440,11 +440,25 @@ class AppController:
                 continue
             if not content or not content.strip():
                 continue
+
             # Skip error placeholder messages saved as assistant role
-            meta = m.get("metadata") or {}
-            if isinstance(meta, dict) and meta.get("error"):
+            meta = m.get("metadata")
+            if isinstance(meta, str) and meta.strip():
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    meta = {}
+            elif not isinstance(meta, dict):
+                meta = {}
+
+            if meta.get("error") or content.startswith("I encountered an error") or content.startswith("⚠️"):
                 logger.debug("Skipping error placeholder message from AI context")
                 continue
+
+            # Deduplicate consecutive identical messages to avoid token repeat limit aborts
+            if ai_msgs and ai_msgs[-1].role == role and ai_msgs[-1].content == content:
+                continue
+
             ai_msgs.append(
                 AIMessage(
                     role=role,
