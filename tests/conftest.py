@@ -2,14 +2,29 @@
 
 import os
 from pathlib import Path
+import sys
 import tempfile
 import pytest
+from PySide6.QtWidgets import QApplication
 
 # Ensure headless Qt testing
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from config.settings import AppConfig, SystemPaths
 from storage.database import DatabaseManager
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """Single QApplication instance for entire test session."""
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
+    yield app
+    try:
+        app.processEvents()
+    except Exception:
+        pass
 
 
 @pytest.fixture
