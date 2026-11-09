@@ -83,14 +83,14 @@ class ChatView(QWidget):
         header_layout.setSpacing(8)
 
         self.lbl_chat_title = QLabel("Conversation")
-        self.lbl_chat_title.setStyleSheet("font-size: 16px; font-weight: 700; color: #f0f6fc;")
+        self.lbl_chat_title.setStyleSheet("font-size: 16px; font-weight: 700; color: #111827;")
         header_layout.addWidget(self.lbl_chat_title)
 
         header_layout.addSpacing(10)
 
         # Routing Mode selector
         lbl_routing = QLabel("Routing:")
-        lbl_routing.setStyleSheet("color: #8b949e; font-size: 12px; font-weight: 600;")
+        lbl_routing.setStyleSheet("color: #4b5563; font-size: 12px; font-weight: 600;")
         header_layout.addWidget(lbl_routing)
 
         self.combo_routing_mode = QComboBox()
@@ -103,19 +103,19 @@ class ChatView(QWidget):
 
         # Engine selector
         lbl_engine = QLabel("Engine:")
-        lbl_engine.setStyleSheet("color: #8b949e; font-size: 12px; font-weight: 600;")
+        lbl_engine.setStyleSheet("color: #4b5563; font-size: 12px; font-weight: 600;")
         header_layout.addWidget(lbl_engine)
 
         self.combo_engine = QComboBox()
         self.combo_engine.addItem("Local AI (Ollama)", "local")
-        self.combo_engine.addItem("Cloud AI", "cloud")
-        self.combo_engine.setFixedWidth(140)
+        self.combo_engine.addItem("Cloud AI (Gemini)", "cloud")
+        self.combo_engine.setFixedWidth(150)
         self.combo_engine.currentIndexChanged.connect(self._on_engine_selection_changed)
         header_layout.addWidget(self.combo_engine)
 
         # Model selector
         lbl_model = QLabel("Model:")
-        lbl_model.setStyleSheet("color: #8b949e; font-size: 12px; font-weight: 600;")
+        lbl_model.setStyleSheet("color: #4b5563; font-size: 12px; font-weight: 600;")
         header_layout.addWidget(lbl_model)
 
         self.combo_model = QComboBox()
@@ -126,15 +126,15 @@ class ChatView(QWidget):
         # Routing status badge
         self.lbl_routing_badge = QLabel("[Auto: Ready]")
         self.lbl_routing_badge.setStyleSheet(
-            "color: #58a6ff; font-size: 11px; font-weight: 600; background-color: #161b22; "
-            "border: 1px solid #30363d; border-radius: 4px; padding: 2px 6px;"
+            "color: #0067c0; font-size: 11px; font-weight: 600; background-color: #e0edff; "
+            "border: 1px solid #b9d5ff; border-radius: 4px; padding: 2px 8px;"
         )
         self.lbl_routing_badge.setToolTip("Intelligent AI router evaluates privacy classification and reasoning complexity.")
         header_layout.addWidget(self.lbl_routing_badge)
 
         # Health badge
         self.lbl_engine_health = QLabel("● Ready")
-        self.lbl_engine_health.setStyleSheet("color: #3fb950; font-size: 11px; font-weight: bold; margin-left: 2px;")
+        self.lbl_engine_health.setStyleSheet("color: #15803d; font-size: 11px; font-weight: bold; margin-left: 2px;")
         header_layout.addWidget(self.lbl_engine_health)
 
         header_layout.addStretch()
@@ -175,12 +175,12 @@ class ChatView(QWidget):
         # Memory Proposal Notification Banner (AI suggests; user approves)
         self.proposal_notification = QFrame()
         self.proposal_notification.setStyleSheet(
-            "background-color: #1a2332; border: 1px solid #388bfd; border-radius: 6px; padding: 6px 10px;"
+            "background-color: #eff6ff; border: 1px solid #93c5fd; border-radius: 6px; padding: 6px 10px;"
         )
         prop_notif_layout = QHBoxLayout(self.proposal_notification)
         prop_notif_layout.setContentsMargins(4, 2, 4, 2)
         self.lbl_prop_notif = QLabel("💡 New memory candidate detected awaiting your approval.")
-        self.lbl_prop_notif.setStyleSheet("color: #58a6ff; font-size: 11px; font-weight: 600;")
+        self.lbl_prop_notif.setStyleSheet("color: #1e40af; font-size: 11px; font-weight: 600;")
         self.btn_review_prop = QPushButton("Review in Memory")
         self.btn_review_prop.setProperty("class", "btn_primary")
         self.btn_review_prop.setFixedHeight(26)
@@ -211,11 +211,11 @@ class ChatView(QWidget):
         btn_row.addWidget(self.btn_mic)
 
         self.lbl_input_hint = QLabel("Tamil, English & Mixed speech supported")
-        self.lbl_input_hint.setStyleSheet("color: #7d8590; font-size: 11px;")
+        self.lbl_input_hint.setStyleSheet("color: #6b7280; font-size: 11px;")
         btn_row.addWidget(self.lbl_input_hint)
 
         self.lbl_generation_status = QLabel("")
-        self.lbl_generation_status.setStyleSheet("color: #58a6ff; font-size: 11px; font-weight: 600; margin-left: 10px;")
+        self.lbl_generation_status.setStyleSheet("color: #0067c0; font-size: 11px; font-weight: 600; margin-left: 10px;")
         btn_row.addWidget(self.lbl_generation_status)
 
         btn_row.addStretch()
@@ -273,8 +273,8 @@ class ChatView(QWidget):
             self.combo_engine.setCurrentIndex(0)
             self.lbl_routing_badge.setText("[Forced Local: Active]")
             self.lbl_routing_badge.setStyleSheet(
-                "color: #f85149; font-size: 11px; font-weight: 600; background-color: #161b22; "
-                "border: 1px solid #f85149; border-radius: 4px; padding: 2px 6px;"
+                "color: #dc2626; font-size: 11px; font-weight: 600; background-color: #fee2e2; "
+                "border: 1px solid #fca5a5; border-radius: 4px; padding: 2px 8px;"
             )
             self.lbl_routing_badge.setToolTip("Strict offline mode enforced: all queries are routed to Local AI.")
         elif mode_data == "manual":
@@ -282,40 +282,40 @@ class ChatView(QWidget):
             eng = "Local AI" if self.combo_engine.currentIndex() == 0 else "Cloud AI"
             self.lbl_routing_badge.setText(f"[Manual: {eng}]")
             self.lbl_routing_badge.setStyleSheet(
-                "color: #d29922; font-size: 11px; font-weight: 600; background-color: #161b22; "
-                "border: 1px solid #d29922; border-radius: 4px; padding: 2px 6px;"
+                "color: #b45309; font-size: 11px; font-weight: 600; background-color: #fef3c7; "
+                "border: 1px solid #fcd34d; border-radius: 4px; padding: 2px 8px;"
             )
             self.lbl_routing_badge.setToolTip("Manual override mode: routing strictly follows the Engine selector.")
         else:
             self.combo_engine.setEnabled(True)
             self.lbl_routing_badge.setText("[Auto Route: Ready]")
             self.lbl_routing_badge.setStyleSheet(
-                "color: #58a6ff; font-size: 11px; font-weight: 600; background-color: #161b22; "
-                "border: 1px solid #30363d; border-radius: 4px; padding: 2px 6px;"
+                "color: #0067c0; font-size: 11px; font-weight: 600; background-color: #e0edff; "
+                "border: 1px solid #b9d5ff; border-radius: 4px; padding: 2px 8px;"
             )
             self.lbl_routing_badge.setToolTip("Intelligent AI router evaluates privacy classification and reasoning complexity.")
 
     def _update_routing_badge(self, decision: RoutingDecision) -> None:
         """Update routing status label and tooltip based on decision."""
         color_map = {
-            "PUBLIC": "#3fb950",
-            "PERSONAL": "#d29922",
-            "SENSITIVE": "#f85149",
+            "PUBLIC": ("#15803d", "#dcfce7", "#86efac"),
+            "PERSONAL": ("#b45309", "#fef3c7", "#fcd34d"),
+            "SENSITIVE": ("#b91c1c", "#fee2e2", "#fca5a5"),
         }
         level_str = decision.privacy.level.value
-        col = color_map.get(level_str, "#58a6ff")
+        text_col, bg_col, border_col = color_map.get(level_str, ("#0067c0", "#e0edff", "#b9d5ff"))
         eng = "Local AI" if decision.selected_engine == "local" else "Cloud AI"
         self.lbl_routing_badge.setText(f"Route: {eng} | {level_str} | {decision.complexity.category.value}")
         self.lbl_routing_badge.setStyleSheet(
-            f"color: {col}; font-size: 11px; font-weight: 600; background-color: #161b22; "
-            f"border: 1px solid {col}; border-radius: 4px; padding: 2px 6px;"
+            f"color: {text_col}; font-size: 11px; font-weight: 600; background-color: {bg_col}; "
+            f"border: 1px solid {border_col}; border-radius: 4px; padding: 2px 8px;"
         )
         self.lbl_routing_badge.setToolTip(f"Routing Reason: {decision.routing_reason}\n\nModel: {decision.selected_model}")
 
     def _get_current_engine_type(self) -> str:
         """Return 'local' or 'cloud'."""
         data = self.combo_engine.currentData()
-        return str(data) if data else "local"
+        return str(data) if data else "cloud"
 
     def _on_engine_selection_changed(self, index: int) -> None:
         """Handle user changing engine via combo box."""
@@ -325,20 +325,21 @@ class ChatView(QWidget):
 
     def _on_ai_engine_event(self, engine_type: str) -> None:
         """Sync UI when engine changes from elsewhere."""
-        target_idx = 0 if engine_type == "local" else 1
-        if self.combo_engine.currentIndex() != target_idx:
+        idx = self.combo_engine.findData(engine_type)
+        if idx >= 0 and self.combo_engine.currentIndex() != idx:
             self.combo_engine.blockSignals(True)
-            self.combo_engine.setCurrentIndex(target_idx)
+            self.combo_engine.setCurrentIndex(idx)
             self.combo_engine.blockSignals(False)
             self._refresh_models_for_engine(engine_type)
 
     def _refresh_engine_and_models(self) -> None:
         """Initialize engine selector and model options from config."""
         saved_engine = self.controller.get_selected_ai_engine()
-        idx = 1 if saved_engine == "cloud" else 0
-        self.combo_engine.blockSignals(True)
-        self.combo_engine.setCurrentIndex(idx)
-        self.combo_engine.blockSignals(False)
+        idx = self.combo_engine.findData(saved_engine)
+        if idx >= 0:
+            self.combo_engine.blockSignals(True)
+            self.combo_engine.setCurrentIndex(idx)
+            self.combo_engine.blockSignals(False)
         self._refresh_models_for_engine(saved_engine)
 
     def _refresh_models_for_engine(self, engine_type: str) -> None:
@@ -450,9 +451,9 @@ class ChatView(QWidget):
             row_layout.addWidget(bubble)
             bubble.setMaximumWidth(680)
         elif role == "system_error":
-            bubble.setStyleSheet("background-color: #3b1d1d; border: 1px solid #f85149; border-radius: 8px;")
+            bubble.setStyleSheet("background-color: #fef2f2; border: 1px solid #fca5a5; border-radius: 8px;")
             role_lbl = QLabel("System Error")
-            role_lbl.setStyleSheet("color: #ff7b72; font-weight: bold; font-size: 11px;")
+            role_lbl.setStyleSheet("color: #dc2626; font-weight: bold; font-size: 11px;")
             row_layout.addWidget(bubble)
             row_layout.addStretch()
             bubble.setMaximumWidth(680)
@@ -512,6 +513,7 @@ class ChatView(QWidget):
         """Execute a Windows computer control instruction asynchronously and display output."""
         import asyncio
         from datetime import datetime, timezone
+        from ai.models import AIMessage
 
         now_str = datetime.now(timezone.utc).strftime("%H:%M:%S")
         summary_msg = f"⚙️ Executing system action: {plan.summary}..."
@@ -520,24 +522,88 @@ class ChatView(QWidget):
 
         async def _run():
             try:
+                # 1. Execute approved Windows action
                 res = await self.controller.execute_windows_instruction(text, source="chat")
-                out_parts = []
-                if res.stdout:
-                    out_parts.append(f"Output:\n```\n{res.stdout.strip()}\n```")
-                if res.stderr:
-                    out_parts.append(f"Error details:\n```\n{res.stderr.strip()}\n```")
 
-                status_icon = "✅" if res.success else "❌"
-                status_text = "Completed successfully" if res.success else f"Failed (exit code {res.exit_code})"
-                if res.error:
+                # 2. Capture actual execution result (Verify execution)
+                is_verified_success = bool(res.success and (res.exit_code == 0 or res.exit_code is None))
+                status_icon = "✅" if is_verified_success else "❌"
+                status_text = "Completed successfully" if is_verified_success else f"Failed (exit code {res.exit_code})"
+                if res.error and not is_verified_success:
                     status_text += f": {res.error}"
 
-                body = f"{status_icon} **{plan.summary}** — {status_text}"
-                if out_parts:
-                    body += "\n\n" + "\n\n".join(out_parts)
+                # 3. Formulate concise result for AI (safe truncation)
+                raw_out = (res.stdout or "").strip()
+                if len(raw_out) > 200:
+                    concise_out = raw_out[:120] + "... " + raw_out[-60:]
+                else:
+                    concise_out = raw_out
+
+                raw_err = (res.stderr or res.error or "").strip()
+                if len(raw_err) > 200:
+                    concise_err = raw_err[:120] + "... " + raw_err[-60:]
+                else:
+                    concise_err = raw_err
+
+                if is_verified_success:
+                    concise_result = f"Action '{plan.summary}' was executed successfully."
+                    if concise_out:
+                        concise_result += f" Details: {concise_out}"
+                else:
+                    concise_result = f"Action '{plan.summary}' failed with exit code {res.exit_code}."
+                    if concise_err:
+                        concise_result += f" Error: {concise_err}"
+
+                # 4. Generate short user-facing confirmation via AI
+                ai_confirmation = ""
+                ai_failed_reason = ""
+                try:
+                    ai_mgr = self.controller.get_ai_manager()
+                    action_msg = [
+                        AIMessage(
+                            role="user",
+                            content=(
+                                f"Summarize this completed Windows system action in one concise, natural confirmation sentence for the user:\n"
+                                f"{concise_result}"
+                            ),
+                        )
+                    ]
+                    ai_resp = await ai_mgr.generate(
+                        messages=action_msg,
+                        engine_type="cloud",
+                        num_predict=64,
+                        temperature=0.3,
+                        timeout=15.0,
+                    )
+                    if ai_resp and ai_resp.content and ai_resp.content.strip():
+                        ai_confirmation = ai_resp.content.strip()
+                except Exception as ai_exc:
+                    logger.warning("AI generation of action confirmation failed: %s", ai_exc)
+                    ai_failed_reason = str(ai_exc)
+
+                # 5. Build final user-facing response
+                if ai_confirmation:
+                    body = f"{status_icon} **{plan.summary}** — {status_text}\n\n{ai_confirmation}"
+                else:
+                    # If AI generation fails, display actual action result and explain response generation failed
+                    body = f"{status_icon} **{plan.summary}** — {status_text}"
+                    if concise_out and is_verified_success:
+                        body += f"\n\n```\n{concise_out}\n```"
+                    if concise_err:
+                        body += f"\n\n*Error details:*\n```\n{concise_err}\n```"
+                    if ai_failed_reason:
+                        body += f"\n\n*(AI confirmation unavailable: {ai_failed_reason})*"
 
                 content_lbl.setText(body)
-                msg_data = self.controller.send_message(body, role="assistant", metadata={"action_plan": plan.summary})
+                msg_data = self.controller.send_message(
+                    body,
+                    role="assistant",
+                    metadata={
+                        "action_plan": plan.summary,
+                        "verified_success": is_verified_success,
+                        "exit_code": res.exit_code,
+                    },
+                )
                 self._just_finished_msg_id = msg_data["id"]
             except Exception as exc:
                 err_text = f"❌ System execution error: {exc}"
@@ -553,6 +619,7 @@ class ChatView(QWidget):
                 asyncio.create_task(_run())
         except RuntimeError:
             pass
+
 
     def _on_retry_last_message(self) -> None:
         """Retry generating the last message with currently selected engine/model."""
@@ -603,27 +670,39 @@ class ChatView(QWidget):
             QApplication.instance() is not None
             and QApplication.instance().platformName() == "offscreen"
         )
-        if effective_mode == RoutingMode.AUTO and decision.is_fallback_needed and prompt and not is_headless:
-            from ui.dialogs.consent_dialog import FallbackApprovalDialog
-            dialog = FallbackApprovalDialog(
-                target_engine=decision.selected_engine,
-                fallback_engine=decision.fallback_engine or "local",
-                reason=decision.fallback_reason or "Service not reachable",
-                parent=self,
-            )
-            dialog.exec()
-            if not dialog.approved_fallback:
+        if effective_mode == RoutingMode.AUTO and decision.is_fallback_needed and prompt:
+            if decision.fallback_engine is None:
                 now_str = datetime.now(timezone.utc).strftime("%H:%M:%S")
                 self._render_message_bubble(
                     "system_error",
-                    f"Request cancelled: Target engine '{decision.selected_engine}' is unavailable and fallback was declined.",
+                    f"⚠️ **Cloud AI (Gemini) Unavailable**: {decision.availability_message or 'Service unreachable'}\n\n"
+                    f"*Click 🔄 Retry to try again, or manually switch engine to Local AI if you prefer.*",
                     now_str,
                 )
                 self.btn_retry.setVisible(True)
                 self._finish_generation_ui()
                 return
-            target_engine = decision.fallback_engine or "local"
-            logger.info("User explicitly approved engine fallback to: %s", target_engine)
+            elif not is_headless:
+                from ui.dialogs.consent_dialog import FallbackApprovalDialog
+                dialog = FallbackApprovalDialog(
+                    target_engine=decision.selected_engine,
+                    fallback_engine=decision.fallback_engine,
+                    reason=decision.fallback_reason or "Service not reachable",
+                    parent=self,
+                )
+                dialog.exec()
+                if not dialog.approved_fallback:
+                    now_str = datetime.now(timezone.utc).strftime("%H:%M:%S")
+                    self._render_message_bubble(
+                        "system_error",
+                        f"Request cancelled: Target engine '{decision.selected_engine}' is unavailable and fallback was declined.",
+                        now_str,
+                    )
+                    self.btn_retry.setVisible(True)
+                    self._finish_generation_ui()
+                    return
+                target_engine = decision.fallback_engine
+                logger.info("User explicitly approved engine fallback to: %s", target_engine)
         elif effective_mode in (RoutingMode.MANUAL_LOCAL, RoutingMode.MANUAL_CLOUD, RoutingMode.FORCE_LOCAL):
             target_engine = "local" if effective_mode in (RoutingMode.MANUAL_LOCAL, RoutingMode.FORCE_LOCAL) else "cloud"
 
@@ -689,14 +768,17 @@ class ChatView(QWidget):
         self._scroll_to_bottom()
 
         # Prepare typed AIMessage context
-        messages = self.controller.get_conversation_ai_messages(limit=20)
+        messages = self.controller.get_conversation_ai_messages(limit=15)
         # Update last user message if sanitized
         if prompt_to_send != prompt and messages and messages[-1].role == "user":
             messages[-1].content = prompt_to_send
 
+        extra_worker_kwargs = {}
         if final_mem_context:
-            from ai.models import AIMessage
-            messages.insert(0, AIMessage(role="system", content=final_mem_context))
+            extra_worker_kwargs["system_prompt"] = (
+                "You are HAKS, a helpful, private, local-first personal AI assistant.\n\n"
+                + final_mem_context
+            )
 
         # Launch background worker thread
         self._worker = AIInferenceWorker(
@@ -704,6 +786,7 @@ class ChatView(QWidget):
             engine_type=target_engine,
             manager=self.controller.get_ai_manager(),
             parent=self,
+            **extra_worker_kwargs,
         )
         self._worker.signals.chunk_received.connect(self._on_worker_chunk)
         self._worker.signals.finished.connect(self._on_worker_finished)
@@ -752,14 +835,55 @@ class ChatView(QWidget):
         logger.info("Inference finished successfully (%d chars)", len(full_text))
 
     def _on_worker_error(self, error_message: str) -> None:
-        """Handle inference failure."""
+        """Handle inference failure with actionable diagnostics."""
         self._finish_generation_ui()
         self.btn_retry.setVisible(True)
 
-        err_display = (
-            f"⚠️ **AI Engine Error**\n\n{error_message}\n\n"
-            f"*Check engine health or switch engines using the selector above.*"
-        )
+        lower_err = error_message.lower()
+        if "api key" in lower_err or "unauthorized" in lower_err or "authentication" in lower_err:
+            err_display = (
+                f"🔑 **Gemini Authentication Error**\n\n{error_message}\n\n"
+                f"*Please verify that your Google Gemini API key is configured correctly in Settings > API Keys.*"
+            )
+        elif "quota" in lower_err or "rate limit" in lower_err or "429" in lower_err:
+            err_display = (
+                f"⏳ **Gemini Rate Limit Exceeded**\n\n{error_message}\n\n"
+                f"*Google Gemini API quota or rate limit has been exceeded. Please wait a moment and click Retry.*"
+            )
+        elif "high demand" in lower_err or "503" in lower_err:
+            err_display = (
+                f"⚠️ **Gemini High Demand**\n\n{error_message}\n\n"
+                f"*The Gemini model is temporarily experiencing high demand. Please click Retry in a few seconds.*"
+            )
+        elif "gemini" in lower_err and ("network" in lower_err or "connection" in lower_err or "timed out" in lower_err or "offline" in lower_err):
+            err_display = (
+                f"🌐 **Gemini Network / Connectivity Error**\n\n{error_message}\n\n"
+                f"*Could not connect to Google Gemini API. Please check your internet connection and click Retry.*"
+            )
+        elif "token repeat limit" in lower_err:
+            err_display = (
+                f"⚠️ **Token Repeat Limit Reached**\n\n{error_message}\n\n"
+                f"*Ollama detected repetitive text generation and aborted to save resources. "
+                f"Try rephrasing your prompt or adjust temperature/predict limits in AI Engine Settings.*"
+            )
+        elif "token limit" in lower_err or "prediction aborted" in lower_err:
+            err_display = (
+                f"⚠️ **Token Limit Reached**\n\n{error_message}\n\n"
+                f"*Ollama prediction aborted because the token limit was reached. "
+                f"You can adjust context window (num_ctx) or predict tokens in AI Engine Settings.*"
+            )
+        elif "context window" in lower_err or "context overflow" in lower_err:
+            err_display = (
+                f"⚠️ **Context Window Overflow**\n\n{error_message}\n\n"
+                f"*The total prompt context exceeded the model's context capacity. "
+                f"Previous history has been trimmed automatically.*"
+            )
+        else:
+            err_display = (
+                f"⚠️ **AI Engine Error**\n\n{error_message}\n\n"
+                f"*Click Retry to attempt generation again, or check engine health in AI Engine Settings.*"
+            )
+
         if self._current_streaming_lbl:
             self._current_streaming_lbl.setText(err_display)
             self._current_streaming_lbl.setStyleSheet("color: #ff7b72;")

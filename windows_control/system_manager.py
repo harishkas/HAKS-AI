@@ -187,9 +187,12 @@ class SystemManager:
                 if "time<1ms" in res.stdout.lower():
                     return 0.5
                 return 15.0  # Fallback valid response
+            if host in ("127.0.0.1", "localhost", "::1"):
+                # Windows firewall may block local ICMP echo; loopback is inherently reachable
+                return 0.1
         except Exception:
-            pass
-        return None
+            if host in ("127.0.0.1", "localhost", "::1"):
+                return 0.1
 
     def test_port_connectivity(self, host: str, port: int, timeout_sec: float = 3.0) -> bool:
         """Test TCP socket connection to a specific host and port."""

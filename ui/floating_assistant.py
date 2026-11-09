@@ -117,10 +117,8 @@ class FloatingAssistant(QWidget):
 
         # Compact response preview label
         self.lbl_response_preview = QLabel("Hey HAKS is standing by. Type or speak below:")
+        self.lbl_response_preview.setObjectName("floating_preview")
         self.lbl_response_preview.setWordWrap(True)
-        self.lbl_response_preview.setStyleSheet(
-            "background-color: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 8px; color: #c9d1d9; font-size: 12px;"
-        )
         self.lbl_response_preview.setFixedHeight(75)
         body_layout.addWidget(self.lbl_response_preview)
 
@@ -224,19 +222,80 @@ class FloatingAssistant(QWidget):
     def _execute_floating_computer_instruction(self, text: str, plan: Any) -> None:
         """Execute a Windows computer control instruction asynchronously and display preview."""
         import asyncio
+        from ai.models import AIMessage
 
         self.lbl_response_preview.setText(f"⚙️ <i>Executing: {plan.summary}...</i>")
 
         async def _run():
             try:
+                # 1. Execute approved Windows action
                 res = await self.controller.execute_windows_instruction(text, source="floating")
-                status = "Done" if res.success else "Failed"
-                summary = f"{status}: {plan.summary}"
-                if res.stdout:
-                    preview = res.stdout.strip()[:100]
-                    summary += f" ({preview}...)"
+
+                # 2. Capture actual execution result (verified success)
+                is_verified_success = bool(res.success and (res.exit_code == 0 or res.exit_code is None))
+                status = "Done" if is_verified_success else f"Failed (exit {res.exit_code})"
+
+                # 3. Formulate concise result for AI
+                raw_out = (res.stdout or "").strip()
+                concise_out = (raw_out[:80] + "...") if len(raw_out) > 80 else raw_out
+                raw_err = (res.stderr or res.error or "").strip()
+                concise_err = (raw_err[:80] + "...") if len(raw_err) > 80 else raw_err
+
+                if is_verified_success:
+                    concise_res = f"Action '{plan.summary}' was executed successfully."
+                    if concise_out:
+                        concise_res += f" Details: {concise_out}"
+                else:
+                    concise_res = f"Action '{plan.summary}' failed with exit code {res.exit_code}."
+                    if concise_err:
+                        concise_res += f" Error: {concise_err}"
+
+                # 4. Generate short user-facing confirmation via AI
+                ai_confirmation = ""
+                ai_failed_reason = ""
+                try:
+                    ai_mgr = self.controller.get_ai_manager()
+                    action_msg = [
+                        AIMessage(
+                            role="user",
+                            content=f"Summarize this completed Windows action in one brief sentence:\n{concise_res}",
+                        )
+                    ]
+                    ai_resp = await ai_mgr.generate(
+                        messages=action_msg,
+                        engine_type="cloud",
+                        num_predict=48,
+                        temperature=0.3,
+                        timeout=10.0,
+                    )
+                    if ai_resp and ai_resp.content and ai_resp.content.strip():
+                        ai_confirmation = ai_resp.content.strip()
+                except Exception as ai_exc:
+                    logger.warning("Floating assistant AI confirmation failed: %s", ai_exc)
+                    ai_failed_reason = str(ai_exc)
+
+                # 5. Build final output
+                if ai_confirmation:
+                    summary = f"<b>{status}:</b> {ai_confirmation}"
+                else:
+                    summary = f"<b>{status}:</b> {plan.summary}"
+                    if concise_out and is_verified_success:
+                        summary += f" ({concise_out})"
+                    elif concise_err:
+                        summary += f" ({concise_err})"
+                    if ai_failed_reason:
+                        summary += f" <i>(AI confirmation failed: {ai_failed_reason})</i>"
+
                 self.lbl_response_preview.setText(f"<b>HAKS:</b> {summary}")
-                self.controller.send_message(summary, role="assistant", metadata={"action_plan": plan.summary})
+                self.controller.send_message(
+                    summary,
+                    role="assistant",
+                    metadata={
+                        "action_plan": plan.summary,
+                        "verified_success": is_verified_success,
+                        "exit_code": res.exit_code,
+                    },
+                )
             except Exception as exc:
                 self.lbl_response_preview.setText(f"<b style='color:#ff7b72;'>Error:</b> {exc}")
                 self.controller.send_message(str(exc), role="system_error")
@@ -247,6 +306,7 @@ class FloatingAssistant(QWidget):
                 asyncio.create_task(_run())
         except RuntimeError:
             pass
+
 
     def _start_floating_inference(self, prompt: str = "") -> None:
         """Start asynchronous AI streaming inference for floating assistant with intelligent routing."""
@@ -276,21 +336,29 @@ class FloatingAssistant(QWidget):
             and QApplication.instance().platformName() == "offscreen"
         )
 
-        # 2. Check engine availability fallback (never silent)
-        if effective_mode == RoutingMode.AUTO and decision.is_fallback_needed and prompt and not is_headless:
-            dialog = FallbackApprovalDialog(
-                target_engine=decision.selected_engine,
-                fallback_engine=decision.fallback_engine or "local",
-                reason=decision.fallback_reason or "Service not reachable",
-                parent=self,
-            )
-            dialog.exec()
-            if not dialog.approved_fallback:
-                self.lbl_response_preview.setText(f"<b style='color:#ff7b72;'>Cancelled:</b> {decision.selected_engine} unavailable")
+        # 2. Check engine availability fallback (never silent, never auto-fallback to Ollama in Gemini-first)
+        if effective_mode == RoutingMode.AUTO and decision.is_fallback_needed and prompt:
+            if decision.fallback_engine is None:
+                self.lbl_response_preview.setText(
+                    f"<b style='color:#ff7b72;'>Gemini Unavailable:</b> {decision.availability_message or 'Please retry'}"
+                )
                 self._is_generating = False
                 self.btn_send.setEnabled(True)
                 return
-            target_engine = decision.fallback_engine or "local"
+            elif not is_headless:
+                dialog = FallbackApprovalDialog(
+                    target_engine=decision.selected_engine,
+                    fallback_engine=decision.fallback_engine,
+                    reason=decision.fallback_reason or "Service not reachable",
+                    parent=self,
+                )
+                dialog.exec()
+                if not dialog.approved_fallback:
+                    self.lbl_response_preview.setText(f"<b style='color:#ff7b72;'>Cancelled:</b> {decision.selected_engine} unavailable")
+                    self._is_generating = False
+                    self.btn_send.setEnabled(True)
+                    return
+                target_engine = decision.fallback_engine
 
         # 3. Check Consent & Redaction
         if decision.requires_consent and decision.consent_request and target_engine == "cloud" and not is_headless:

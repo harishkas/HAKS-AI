@@ -46,7 +46,7 @@ class HistoryView(QWidget):
         # Header
         header = QHBoxLayout()
         title = QLabel("Conversation History")
-        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #f0f6fc;")
+        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #111827;")
         header.addWidget(title)
         header.addStretch()
 
@@ -65,12 +65,6 @@ class HistoryView(QWidget):
 
         # Conversations List
         self.list_widget = QListWidget()
-        self.list_widget.setStyleSheet(
-            "QListWidget { background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 6px; }"
-            "QListWidget::item { padding: 10px; border-bottom: 1px solid #21262d; border-radius: 4px; color: #e6edf3; }"
-            "QListWidget::item:hover { background-color: #21262d; }"
-            "QListWidget::item:selected { background-color: #1f3a5f; color: #58a6ff; }"
-        )
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self.list_widget, stretch=1)
 

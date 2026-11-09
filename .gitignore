@@ -58,3 +58,33 @@ data/*.sqlite3
 data/*.wal
 data/*.shm
 data/backups/
+
+# HAKS private databases and runtime storage
+personal_memory.db
+work_memory.db
+conversations.db
+memory_proposals.db
+settings.db
+*.haksbackup
+quarantine/
+backups/
+
+# HAKS encryption and credentials
+credentials/
+secrets/
+*.secret
+
+# Vector indexes and model caches
+vector_index/
+models/
+model_cache/
+.cache/
+
+# Runtime state
+.session_lock.json
+*.log.*
+
+# Python environments and temporary files
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

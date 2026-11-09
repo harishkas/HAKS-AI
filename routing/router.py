@@ -44,8 +44,10 @@ class AIEngineRouter:
         complexity_classifier: Optional[ComplexityClassifier] = None,
         redactor: Optional[DataRedactor] = None,
         consent_manager: Optional[ConsentManager] = None,
+        config: Optional[Any] = None,
     ) -> None:
         self.ai_manager = ai_manager
+        self.config = config or getattr(ai_manager, "app_config", None)
         self.privacy_classifier = privacy_classifier or get_privacy_classifier()
         self.complexity_classifier = complexity_classifier or get_complexity_classifier()
         self.redactor = redactor or get_data_redactor()
@@ -106,13 +108,24 @@ class AIEngineRouter:
                 target_engine = "cloud"
                 reason = "Cloud AI selected via user request for public query."
             elif mode == RoutingMode.AUTO:
-                # In AUTO mode, use cloud for complex reasoning if available, otherwise local
-                if complexity_res.is_complex:
-                    target_engine = "cloud"
-                    reason = f"Complex task ({complexity_res.category.value}) routed to Cloud AI for high-capacity reasoning."
-                else:
+                if is_online is False:
                     target_engine = "local"
-                    reason = f"Routine query ({complexity_res.category.value}) routed to Local AI for privacy, speed, and zero cloud token usage."
+                    reason = "System is offline. Routed to Local AI (Ollama) for offline operation."
+                else:
+                    # Gemini-first configuration: default to Google Gemini for normal requests
+                    app_cfg = self.config or getattr(self.ai_manager, "app_config", None) or getattr(self.ai_manager, "config", None)
+                    ai_cfg = getattr(app_cfg, "ai", None) if app_cfg else None
+                    default_eng = getattr(ai_cfg, "default_engine", None) or getattr(app_cfg, "default_engine", "cloud")
+                    if default_eng == "local":
+                        if complexity_res.is_complex:
+                            target_engine = "cloud"
+                            reason = f"Complex task ({complexity_res.category.value}) routed to Cloud AI for high-capacity reasoning."
+                        else:
+                            target_engine = "local"
+                            reason = f"Routine query ({complexity_res.category.value}) routed to Local AI for privacy, speed, and zero cloud token usage."
+                    else:
+                        target_engine = "cloud"
+                        reason = f"Gemini-first policy: Query ({complexity_res.category.value}) routed to Google Gemini by default."
 
         # Redaction check for cloud targets
         redaction_preview = None
@@ -130,7 +143,7 @@ class AIEngineRouter:
         else:
             model_name = getattr(self.ai_manager.cloud_engine, "current_model", "gemini-2.5-flash")
 
-        # Engine Availability & Fallback Protection (NEVER silent)
+        # Engine Availability & Fallback Protection (NEVER silent, NEVER auto-fallback to Ollama in Gemini-first)
         health_info = self.ai_manager.get_engine_health()
         target_health = health_info.get(target_engine)
         is_available = target_health.is_healthy if target_health else False
@@ -148,8 +161,13 @@ class AIEngineRouter:
             fallback_reason = "System is offline. Cloud AI is unavailable without internet connectivity."
         elif not is_available:
             is_fallback_needed = True
-            fallback_engine = "local" if target_engine == "cloud" else "cloud"
-            fallback_reason = f"Target engine '{target_engine}' is unavailable: {avail_msg}."
+            if target_engine == "cloud":
+                # Do not silently or automatically switch to Ollama when Gemini fails
+                fallback_engine = None
+                fallback_reason = f"Cloud AI (Gemini) is unavailable: {avail_msg}. Please verify API key, network, or quota, and click Retry."
+            else:
+                fallback_engine = "cloud"
+                fallback_reason = f"Target engine '{target_engine}' is unavailable: {avail_msg}."
 
         # Prepare consent packet if consent is required
         consent_packet = None

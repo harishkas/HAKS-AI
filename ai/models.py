@@ -57,16 +57,42 @@ class AIResponse(BaseModel):
 
 class AIEngineConfig(BaseModel):
     """Configuration parameters for AI engine instances."""
-    engine_type: EngineType = EngineType.LOCAL
-    provider: str = "ollama"
-    model: str = "llama3.2:1b"
-    base_url: str = "http://127.0.0.1:11434"
+    engine_type: EngineType = EngineType.CLOUD
+    provider: str = "gemini"
+    model: str = "gemini-2.5-flash"
+    base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     timeout_seconds: float = 60.0
-    temperature: float = 0.7
-    max_tokens: Optional[int] = None
+    temperature: float = 0.3
+    max_tokens: Optional[int] = 128
+    num_ctx: int = 2048
+    num_predict: int = 128
+    cpu_threads: int = 2
+    repeat_penalty: float = 1.15
     system_prompt: Optional[str] = (
-        "You are HAKS, a helpful, private, local-first personal AI assistant."
+        "You are HAKS, a helpful, private personal AI operating assistant."
     )
+
+
+
+def estimate_tokens(text: str) -> int:
+    """Hardware-aware rough token estimation (~3.5 characters per token)."""
+    if not text:
+        return 0
+    # Add small overhead for message frame/formatting
+    return max(1, int(len(text) / 3.5 + 0.5))
+
+
+def estimate_messages_tokens(
+    messages: list[AIMessage], system_prompt: Optional[str] = None
+) -> int:
+    """Estimate total prompt tokens for a list of messages and optional system prompt."""
+    total = 0
+    if system_prompt:
+        total += estimate_tokens(system_prompt) + 4
+    for msg in messages:
+        total += estimate_tokens(msg.content) + 4  # +4 for role/delimiters
+    return total
+
 
 
 class AIEngineHealth(BaseModel):

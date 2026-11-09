@@ -64,8 +64,8 @@ def test_ai_manager_switching():
 
     mgr = AIEngineManager(local_engine=local_mock, cloud_engine=cloud_mock)
 
-    assert mgr.active_engine_type == EngineType.LOCAL
-    assert mgr.get_active_engine().engine_name == "Local Mock"
+    expected_default = EngineType.CLOUD if mgr.app_config.ai.default_engine == "cloud" else EngineType.LOCAL
+    assert mgr.active_engine_type == expected_default
 
     mgr.set_active_engine("cloud")
     assert mgr.active_engine_type == EngineType.CLOUD

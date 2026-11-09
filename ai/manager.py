@@ -11,7 +11,10 @@ from typing import AsyncIterator, Optional
 from ai.cloud_engine import CloudAIEngine
 from ai.exceptions import (
     AIEngineError,
+    ContextOverflowError,
+    EmptyResponseError,
     GenerationCancelledError,
+    TokenLimitError,
 )
 from ai.interface import AIEngineInterface
 from ai.local_engine import LocalAIEngine
@@ -41,30 +44,36 @@ class AIEngineManager:
     ) -> None:
         self.app_config = config or get_settings()
 
-        # Instantiate local and cloud engines
+        # Instantiate local and cloud engines with hardware-aware local model limits
         local_cfg = AIEngineConfig(
             engine_type=EngineType.LOCAL,
             provider="ollama",
             model=self.app_config.ai.local_model,
             base_url=self.app_config.ai.ollama_base_url,
             timeout_seconds=self.app_config.ai.request_timeout_seconds,
+            num_ctx=getattr(self.app_config.ai, "local_num_ctx", 2048),
+            num_predict=getattr(self.app_config.ai, "local_num_predict", 128),
+            temperature=getattr(self.app_config.ai, "local_temperature", 0.3),
+            cpu_threads=getattr(self.app_config.ai, "local_cpu_threads", 2),
+            repeat_penalty=getattr(self.app_config.ai, "local_repeat_penalty", 1.15),
         )
         self.local_engine = local_engine or LocalAIEngine(local_cfg)
 
         cloud_cfg = AIEngineConfig(
             engine_type=EngineType.CLOUD,
             provider=self.app_config.ai.cloud_provider,
-            model="gemini-2.5-flash",
+            model=getattr(self.app_config.ai, "cloud_model", "gemini-2.5-flash"),
             timeout_seconds=self.app_config.ai.request_timeout_seconds,
         )
         self.cloud_engine = cloud_engine or CloudAIEngine(cloud_cfg)
 
-        # Active engine setting (default "local")
+        # Active engine setting (default "cloud" per Gemini-first architecture)
         self._active_engine_type = (
-            EngineType.LOCAL
-            if self.app_config.ai.default_engine == "local"
-            else EngineType.CLOUD
+            EngineType.CLOUD
+            if self.app_config.ai.default_engine == "cloud"
+            else EngineType.LOCAL
         )
+
 
         # Active cancellation control
         self._current_cancel_event: Optional[asyncio.Event] = None
@@ -150,13 +159,54 @@ class AIEngineManager:
             self._current_cancel_event.set()
         self._is_generating = False
 
+    @staticmethod
+    def _reduce_context_for_retry(
+        messages: list[AIMessage], kwargs: dict
+    ) -> tuple[list[AIMessage], dict]:
+        """Reduce context and adjust parameters for a single controlled retry."""
+        retry_kwargs = dict(kwargs)
+        if "num_predict" in retry_kwargs:
+            retry_kwargs["num_predict"] = max(48, int(retry_kwargs["num_predict"] * 0.75))
+        else:
+            retry_kwargs["num_predict"] = 96
+
+        retry_kwargs["repeat_penalty"] = 1.25
+        retry_kwargs["temperature"] = min(0.3, retry_kwargs.get("temperature", 0.3))
+
+        if not messages:
+            return [], retry_kwargs
+
+        reduced: list[AIMessage] = []
+        # Preserve first system message (condensed)
+        sys_msgs = [m for m in messages if m.role == "system"]
+        if sys_msgs:
+            first_sys = sys_msgs[0]
+            content = first_sys.content
+            if len(content) > 500:
+                content = content[:450] + "\n[... context truncated for token limits ...]"
+            reduced.append(AIMessage(role="system", content=content))
+
+        # Preserve latest user request (never silently discard)
+        user_msgs = [m for m in messages if m.role == "user"]
+        if user_msgs:
+            last_user = user_msgs[-1]
+            content = last_user.content
+            if len(content) > 1200:
+                content = content[:600] + "\n[... truncated ...]\n" + content[-400:]
+            reduced.append(AIMessage(role="user", content=content, timestamp=last_user.timestamp))
+        elif messages and messages[-1].role != "system":
+            reduced.append(messages[-1])
+
+        return reduced, retry_kwargs
+
     async def generate(
         self,
         messages: list[AIMessage],
         engine_type: Optional[str | EngineType] = None,
+        allow_retry: bool = True,
         **kwargs,
     ) -> AIResponse:
-        """Generate response asynchronously through designated or active engine."""
+        """Generate response asynchronously through designated or active engine with safeguards."""
         engine = self.get_engine(engine_type)
         self._is_generating = True
         cancel_event = asyncio.Event()
@@ -172,7 +222,26 @@ class AIEngineManager:
                     raise GenerationCancelledError("Inference generation was cancelled by user.", engine=engine.engine_name)
                 await asyncio.sleep(0.05)
 
-            return await task
+            response = await task
+            # Check for empty response
+            if response and not response.content.strip():
+                logger.warning("Engine %s returned empty response.", engine.engine_name)
+
+            return response
+        except (TokenLimitError, ContextOverflowError) as exc:
+            if allow_retry:
+                logger.warning(
+                    "Caught %s during generation. Attempting 1 controlled retry with reduced context...",
+                    type(exc).__name__,
+                )
+                reduced_msgs, retry_kwargs = self._reduce_context_for_retry(messages, kwargs)
+                return await self.generate(
+                    reduced_msgs,
+                    engine_type=engine_type,
+                    allow_retry=False,
+                    **retry_kwargs,
+                )
+            raise
         finally:
             self._is_generating = False
             self._current_cancel_event = None
@@ -181,13 +250,15 @@ class AIEngineManager:
         self,
         messages: list[AIMessage],
         engine_type: Optional[str | EngineType] = None,
+        allow_retry: bool = True,
         **kwargs,
     ) -> AsyncIterator[AIStreamChunk]:
-        """Stream response tokens asynchronously through designated or active engine."""
+        """Stream response tokens asynchronously through designated or active engine with safeguards."""
         engine = self.get_engine(engine_type)
         self._is_generating = True
         cancel_event = asyncio.Event()
         self._current_cancel_event = cancel_event
+        chunks_yielded = 0
 
         try:
             stream_gen = engine.stream(messages, **kwargs)
@@ -198,10 +269,28 @@ class AIEngineManager:
                         "Streaming was stopped by user.",
                         engine=engine.engine_name,
                     )
+                chunks_yielded += 1
                 yield chunk
+        except (TokenLimitError, ContextOverflowError) as exc:
+            if allow_retry and chunks_yielded == 0:
+                logger.warning(
+                    "Caught %s before streaming tokens. Attempting 1 controlled retry with reduced context...",
+                    type(exc).__name__,
+                )
+                reduced_msgs, retry_kwargs = self._reduce_context_for_retry(messages, kwargs)
+                async for chunk in self.stream(
+                    reduced_msgs,
+                    engine_type=engine_type,
+                    allow_retry=False,
+                    **retry_kwargs,
+                ):
+                    yield chunk
+            else:
+                raise
         finally:
             self._is_generating = False
             self._current_cancel_event = None
+
 
     async def shutdown(self) -> None:
         """Clean up active resources and unload local models if necessary."""
@@ -217,4 +306,6 @@ def get_ai_manager(config: Optional[AppConfig] = None) -> AIEngineManager:
     global _manager_instance
     if _manager_instance is None:
         _manager_instance = AIEngineManager(config)
+    elif config is not None:
+        _manager_instance.app_config = config
     return _manager_instance

@@ -45,12 +45,14 @@ class MemoryContextBuilder:
         min_relevance: float = 0.15,
         is_cloud_target: bool = False,
         redact_for_cloud: bool = False,
+        max_tokens: int = 350,
     ) -> str:
-        """Retrieve and format relevant approved memories matching the query with privacy guards."""
+        """Retrieve and format relevant approved memories matching the query with privacy guards and token budget."""
         if not query.strip():
             return ""
 
         sections = []
+        est_tokens = 0
 
         # 1. Relevant Personal Memories
         if include_personal:
@@ -71,7 +73,17 @@ class MemoryContextBuilder:
                     if is_cloud_target and redact_for_cloud:
                         content = self.redactor.redact(content).sanitized_text
 
-                    lines.append(f"- [{item.category.upper()}] {item.title}: {content}")
+                    # Safe length truncation for individual memory items
+                    if len(content) > 250:
+                        content = content[:220] + "..."
+
+                    entry = f"- [{item.category.upper()}] {item.title}: {content}"
+                    entry_toks = int(len(entry) / 3.5) + 2
+                    if est_tokens + entry_toks > max_tokens and len(lines) > 1:
+                        break
+
+                    lines.append(entry)
+                    est_tokens += entry_toks
 
                 if len(lines) > 1:
                     sections.append("\n".join(lines))
@@ -95,7 +107,17 @@ class MemoryContextBuilder:
                     if is_cloud_target and redact_for_cloud:
                         content = self.redactor.redact(content).sanitized_text
 
-                    lines.append(f"- [{item.project_name.upper()}] {item.title}: {content}")
+                    # Safe length truncation for individual memory items
+                    if len(content) > 250:
+                        content = content[:220] + "..."
+
+                    entry = f"- [{item.project_name.upper()}] {item.title}: {content}"
+                    entry_toks = int(len(entry) / 3.5) + 2
+                    if est_tokens + entry_toks > max_tokens and len(lines) > 1:
+                        break
+
+                    lines.append(entry)
+                    est_tokens += entry_toks
 
                 if len(lines) > 1:
                     sections.append("\n".join(lines))
@@ -105,8 +127,9 @@ class MemoryContextBuilder:
 
         context_body = "\n\n".join(sections)
         logger.info(
-            "Retrieved %d memory context section(s) for query: '%s' (cloud_target=%s)",
+            "Retrieved %d memory context section(s) (~%d tokens) for query: '%s' (cloud_target=%s)",
             len(sections),
+            est_tokens,
             query[:30],
             is_cloud_target,
         )
@@ -115,3 +138,4 @@ class MemoryContextBuilder:
             f"{context_body}\n"
             "----------------------------------------------------------------"
         )
+

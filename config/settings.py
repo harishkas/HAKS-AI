@@ -112,7 +112,7 @@ class UIConfig(BaseModel):
     window_height: int = 750
     min_window_width: int = 850
     min_window_height: int = 580
-    theme: Literal["dark", "light"] = "dark"
+    theme: Literal["dark", "light"] = "light"
     enable_high_dpi: bool = True
     start_minimized_to_tray: bool = False
 
@@ -120,7 +120,7 @@ class UIConfig(BaseModel):
 class AIConfig(BaseModel):
     """Local & Cloud AI runtime configuration."""
 
-    default_engine: Literal["local", "cloud"] = "local"
+    default_engine: Literal["local", "cloud"] = "cloud"
     ollama_base_url: str = Field(
         default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     )
@@ -130,7 +130,26 @@ class AIConfig(BaseModel):
     cloud_provider: str = Field(
         default_factory=lambda: os.getenv("HAKS_CLOUD_PROVIDER", "gemini")
     )
+    cloud_model: str = Field(
+        default_factory=lambda: os.getenv("HAKS_CLOUD_MODEL", "gemini-2.5-flash")
+    )
     request_timeout_seconds: float = 60.0
+    # Hardware-aware local model limits (tuned for 8 GB RAM / dual-core CPU)
+    local_num_ctx: int = Field(
+        default_factory=lambda: int(os.getenv("HAKS_LOCAL_NUM_CTX", "2048"))
+    )
+    local_num_predict: int = Field(
+        default_factory=lambda: int(os.getenv("HAKS_LOCAL_NUM_PREDICT", "128"))
+    )
+    local_temperature: float = Field(
+        default_factory=lambda: float(os.getenv("HAKS_LOCAL_TEMPERATURE", "0.3"))
+    )
+    local_cpu_threads: int = Field(
+        default_factory=lambda: int(os.getenv("HAKS_LOCAL_CPU_THREADS", "2"))
+    )
+    local_repeat_penalty: float = Field(
+        default_factory=lambda: float(os.getenv("HAKS_LOCAL_REPEAT_PENALTY", "1.15"))
+    )
 
 
 class VoiceConfig(BaseModel):

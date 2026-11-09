@@ -77,7 +77,7 @@ class EditPersonalMemoryDialog(QDialog):
         # Show source conversation if editing
         if self.memory_data.get("source_conversation_id"):
             src_lbl = QLabel(f"Origin Session: {self.memory_data['source_conversation_id']}")
-            src_lbl.setStyleSheet("color: #8b949e; font-size: 11px;")
+            src_lbl.setStyleSheet("color: #6b7280; font-size: 11px;")
             form.addRow("Source:", src_lbl)
 
         layout.addLayout(form)
@@ -132,9 +132,9 @@ class PersonalMemoryView(QWidget):
         # 1. Header
         header = QHBoxLayout()
         title = QLabel("Personal Memory")
-        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #f0f6fc;")
+        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #111827;")
         subtitle = QLabel("Independent domain: personal preferences, goals & experiences")
-        subtitle.setStyleSheet("color: #8b949e; font-size: 12px; margin-left: 8px;")
+        subtitle.setStyleSheet("color: #4b5563; font-size: 12px; margin-left: 8px;")
         header.addWidget(title)
         header.addWidget(subtitle)
         header.addStretch()
@@ -165,20 +165,17 @@ class PersonalMemoryView(QWidget):
         self.proposal_frame = QFrame()
         self.proposal_frame.setProperty("class", "stat_card")
         self.proposal_frame.setStyleSheet(
-            "background-color: #1a2332; border: 1px solid #388bfd; border-radius: 8px; padding: 10px;"
+            "background-color: #eff6ff; border: 1px solid #93c5fd; border-radius: 8px; padding: 10px;"
         )
         self.proposal_layout = QVBoxLayout(self.proposal_frame)
         self.proposal_layout.setSpacing(6)
 
         prop_header = QLabel("💡 PENDING AI MEMORY PROPOSALS (Approval Required)")
-        prop_header.setStyleSheet("font-weight: 700; color: #58a6ff; font-size: 12px;")
+        prop_header.setStyleSheet("font-weight: 700; color: #1e40af; font-size: 12px;")
         self.proposal_layout.addWidget(prop_header)
 
         self.proposals_list = QListWidget()
         self.proposals_list.setMaximumHeight(90)
-        self.proposals_list.setStyleSheet(
-            "background-color: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-size: 12px;"
-        )
         self.proposal_layout.addWidget(self.proposals_list)
 
         prop_btn_row = QHBoxLayout()
@@ -213,12 +210,6 @@ class PersonalMemoryView(QWidget):
 
         # 4. Memory Items List
         self.list_widget = QListWidget()
-        self.list_widget.setStyleSheet(
-            "QListWidget { background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 6px; }"
-            "QListWidget::item { padding: 12px; border-bottom: 1px solid #21262d; border-radius: 4px; color: #e6edf3; }"
-            "QListWidget::item:hover { background-color: #21262d; }"
-            "QListWidget::item:selected { background-color: #1f3a5f; color: #58a6ff; }"
-        )
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self.list_widget, stretch=1)
 
@@ -235,7 +226,7 @@ class PersonalMemoryView(QWidget):
         actions.addWidget(self.btn_delete)
 
         self.lbl_count = QLabel("0 memories stored")
-        self.lbl_count.setStyleSheet("color: #7d8590; font-size: 12px;")
+        self.lbl_count.setStyleSheet("color: #6b7280; font-size: 12px;")
         actions.addStretch()
         actions.addWidget(self.lbl_count)
 

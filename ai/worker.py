@@ -34,13 +34,16 @@ class AIInferenceWorker(QThread):
         engine_type: Optional[str] = None,
         manager: Optional[AIEngineManager] = None,
         parent: Optional[QObject] = None,
+        **kwargs,
     ) -> None:
         super().__init__(None)  # Decouple thread lifecycle from widget destruction
         self.messages = messages
         self.engine_type = engine_type
         self.manager = manager or get_ai_manager()
         self.signals = AIWorkerSignals()
+        self.extra_kwargs = kwargs
         self._is_cancelled = False
+
 
     def cancel(self) -> None:
         """Request immediate cancellation of inference."""
@@ -60,6 +63,7 @@ class AIInferenceWorker(QThread):
                 stream_gen = self.manager.stream(
                     messages=self.messages,
                     engine_type=self.engine_type,
+                    **self.extra_kwargs,
                 )
 
                 async for chunk in stream_gen:

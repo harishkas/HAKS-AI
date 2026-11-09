@@ -161,21 +161,54 @@ class LocalAIEngine(AIEngineInterface):
 
     def get_capabilities(self) -> EngineCapabilities:
         """Return engine capabilities."""
+        ctx_tokens = getattr(self.config, "num_ctx", 2048)
         return EngineCapabilities(
             streaming=True,
             is_local=True,
-            context_window_tokens=4096,
+            context_window_tokens=ctx_tokens,
             supports_system_prompt=True,
             supports_vision=False,
             supports_tools=False,
         )
 
+    def update_hardware_limits(
+        self,
+        num_ctx: Optional[int] = None,
+        num_predict: Optional[int] = None,
+        temperature: Optional[float] = None,
+        cpu_threads: Optional[int] = None,
+        repeat_penalty: Optional[float] = None,
+    ) -> None:
+        """Update configurable local hardware limits."""
+        if num_ctx is not None:
+            self.config.num_ctx = int(num_ctx)
+        if num_predict is not None:
+            self.config.num_predict = int(num_predict)
+        if temperature is not None:
+            self.config.temperature = float(temperature)
+        if cpu_threads is not None:
+            self.config.cpu_threads = int(cpu_threads)
+        if repeat_penalty is not None:
+            self.config.repeat_penalty = float(repeat_penalty)
+        logger.info(
+            "Updated local hardware limits: num_ctx=%d, num_predict=%d, temp=%.2f, threads=%d",
+            self.config.num_ctx,
+            self.config.num_predict,
+            self.config.temperature,
+            self.config.cpu_threads,
+        )
+
     async def generate(self, messages: list[AIMessage], **kwargs) -> AIResponse:
-        """Generate response via Ollama."""
+        """Generate response via Ollama with hardware-aware token limits."""
         model = kwargs.get("model", self.config.model)
         temp = kwargs.get("temperature", self.config.temperature)
         system_prompt = kwargs.get("system_prompt", self.config.system_prompt)
         timeout = kwargs.get("timeout", self.config.timeout_seconds)
+        num_ctx = kwargs.get("num_ctx", getattr(self.config, "num_ctx", 2048))
+        num_predict = kwargs.get("num_predict", getattr(self.config, "num_predict", 128))
+        cpu_threads = kwargs.get("cpu_threads", getattr(self.config, "cpu_threads", 2))
+        repeat_penalty = kwargs.get("repeat_penalty", getattr(self.config, "repeat_penalty", 1.15))
+        options = kwargs.get("options")
 
         return await self.client.chat(
             model=model,
@@ -183,14 +216,24 @@ class LocalAIEngine(AIEngineInterface):
             temperature=temp,
             system_prompt=system_prompt,
             timeout=timeout,
+            num_ctx=num_ctx,
+            num_predict=num_predict,
+            cpu_threads=cpu_threads,
+            repeat_penalty=repeat_penalty,
+            options=options,
         )
 
     async def stream(self, messages: list[AIMessage], **kwargs) -> AsyncIterator[AIStreamChunk]:
-        """Stream response tokens via Ollama."""
+        """Stream response tokens via Ollama with hardware-aware token limits."""
         model = kwargs.get("model", self.config.model)
         temp = kwargs.get("temperature", self.config.temperature)
         system_prompt = kwargs.get("system_prompt", self.config.system_prompt)
         timeout = kwargs.get("timeout", self.config.timeout_seconds)
+        num_ctx = kwargs.get("num_ctx", getattr(self.config, "num_ctx", 2048))
+        num_predict = kwargs.get("num_predict", getattr(self.config, "num_predict", 128))
+        cpu_threads = kwargs.get("cpu_threads", getattr(self.config, "cpu_threads", 2))
+        repeat_penalty = kwargs.get("repeat_penalty", getattr(self.config, "repeat_penalty", 1.15))
+        options = kwargs.get("options")
 
         async for chunk in self.client.chat_stream(
             model=model,
@@ -198,8 +241,14 @@ class LocalAIEngine(AIEngineInterface):
             temperature=temp,
             system_prompt=system_prompt,
             timeout=timeout,
+            num_ctx=num_ctx,
+            num_predict=num_predict,
+            cpu_threads=cpu_threads,
+            repeat_penalty=repeat_penalty,
+            options=options,
         ):
             yield chunk
+
 
     async def unload_active_model(self) -> bool:
         """Unload active model from memory."""

@@ -327,7 +327,8 @@ def test_router_public_complex_routes_to_cloud(controller: AppController):
 
 
 def test_router_public_simple_routes_to_local(controller: AppController):
-    """Verify simple public queries route to Local AI in AUTO mode."""
+    """Verify simple public queries route to Local AI in AUTO mode when local is configured as default."""
+    controller.config.ai.default_engine = "local"
     router = controller.get_router()
 
     prompt = "Hello HAKS"
@@ -336,6 +337,19 @@ def test_router_public_simple_routes_to_local(controller: AppController):
     assert decision.selected_engine == "local"
     assert decision.privacy_level == PrivacyLevel.PUBLIC
     assert decision.complexity.category == ComplexityCategory.SIMPLE
+
+
+def test_router_gemini_first_default_routes_to_cloud(controller: AppController):
+    """Verify Gemini-first routing defaults normal public queries to Cloud AI (Gemini)."""
+    controller.config.ai.default_engine = "cloud"
+    router = controller.get_router()
+
+    prompt = "Hello HAKS, how are you today?"
+    decision = router.route(prompt, mode=RoutingMode.AUTO)
+
+    assert decision.selected_engine == "cloud"
+    assert decision.privacy_level == PrivacyLevel.PUBLIC
+    assert "Gemini-first" in decision.routing_reason
 
 
 def test_router_explicit_local_override(controller: AppController):
@@ -365,6 +379,7 @@ def test_router_explicit_cloud_with_consent(controller: AppController):
 
 def test_router_non_silent_fallback(controller: AppController):
     """Verify router flags unavailable engines explicitly without silent switching."""
+    controller.config.ai.default_engine = "local"
     router = controller.get_router()
 
     # When Ollama is not running in test environment, targeting local triggers is_fallback_needed

@@ -1,7 +1,8 @@
 """Main Window implementation for HAKS Desktop Application.
 
-PySide6 implementation providing responsive modular layout, high-DPI scaling,
-navigation sidebar, top status bar, stacked content views, and live system monitoring.
+PySide6 implementation providing a clean, modern Windows Light (White mode) UI,
+intuitive navigation sidebar, top status bar with quick theme toggle,
+friendly home dashboard, stacked content views, and live system monitoring.
 """
 
 from typing import Optional
@@ -125,25 +126,25 @@ class MainWindow(QMainWindow):
         layout.setSpacing(4)
 
         # Brand header
-        brand_title = QLabel("HAKS")
+        brand_title = QLabel("HAKS AI")
         brand_title.setObjectName("brand_title")
-        brand_subtitle = QLabel("Personal AI Assistant")
+        brand_subtitle = QLabel("Personal Windows Assistant")
         brand_subtitle.setObjectName("brand_subtitle")
         layout.addWidget(brand_title)
         layout.addWidget(brand_subtitle)
 
-        # Nav items
+        # Nav items with intuitive icons and plain language
         nav_items = [
-            ("home", "Dashboard", 0),
-            ("chat", "New Chat", 1),
-            ("history", "Conversation History", 2),
-            ("personal_memory", "Personal Memory", 3),
-            ("work_memory", "Work Memory", 4),
-            ("voice", "Voice Assistant", 5),
-            ("ai_engine", "AI Engine", 6),
-            ("control", "Computer Control", 7),
-            ("recovery", "Backup & Recovery", 8),
-            ("settings", "Settings", 9),
+            ("home", "🏠  Home", 0),
+            ("chat", "💬  New Chat", 1),
+            ("history", "🕒  History", 2),
+            ("personal_memory", "👤  Personal Memory", 3),
+            ("work_memory", "💼  Work Memory", 4),
+            ("voice", "🎙️  Voice Assistant", 5),
+            ("ai_engine", "⚡  AI Models", 6),
+            ("control", "🖥️  Computer Control", 7),
+            ("recovery", "🛡️  Backup & Recovery", 8),
+            ("settings", "⚙️  Settings", 9),
         ]
 
         for nav_id, label, index in nav_items:
@@ -157,8 +158,8 @@ class MainWindow(QMainWindow):
         layout.addStretch()
 
         # Offline & Privacy notice in sidebar footer
-        privacy_label = QLabel("Offline-First • Privacy-Protected")
-        privacy_label.setStyleSheet("color: #484f58; font-size: 10px; padding: 6px;")
+        privacy_label = QLabel("🔒 100% Private • Offline Ready")
+        privacy_label.setStyleSheet("color: #6b7280; font-size: 11px; padding: 6px 10px; font-weight: 500;")
         layout.addWidget(privacy_label)
 
         # Set Dashboard active by default
@@ -173,20 +174,22 @@ class MainWindow(QMainWindow):
         top_bar.setObjectName("top_bar")
         layout = QHBoxLayout(top_bar)
         layout.setContentsMargins(16, 6, 16, 6)
+        layout.setSpacing(10)
 
-        self.lbl_page_title = QLabel("System Dashboard")
+        self.lbl_page_title = QLabel("Home")
         self.lbl_page_title.setObjectName("top_bar_title")
         layout.addWidget(self.lbl_page_title)
 
         layout.addStretch()
 
         # Network Connectivity Badge
-        self.badge_network = QLabel("Online" if self.controller.is_online() else "Offline")
-        self.badge_network.setProperty("class", "status_badge badge_online" if self.controller.is_online() else "status_badge badge_offline")
+        is_online = self.controller.is_online()
+        self.badge_network = QLabel("Online" if is_online else "Offline")
+        self.badge_network.setProperty("class", "status_badge badge_online" if is_online else "status_badge badge_offline")
         layout.addWidget(self.badge_network)
 
         # Engine Badge
-        self.badge_engine = QLabel("Engine: Local Ollama (Standby)")
+        self.badge_engine = QLabel("Engine: Ready")
         self.badge_engine.setProperty("class", "status_badge badge_local")
         layout.addWidget(self.badge_engine)
 
@@ -196,12 +199,21 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.badge_voice)
 
         # Storage Badge
-        self.badge_storage = QLabel("Storage: 5/5 DBs Active")
-        self.badge_storage.setProperty("class", "status_badge badge_offline")
+        self.badge_storage = QLabel("Storage: 5 DBs Ready")
+        self.badge_storage.setProperty("class", "status_badge badge_local")
         layout.addWidget(self.badge_storage)
 
+        # Quick Theme Toggle Button (One-click Light/Dark switch)
+        current_theme = self.controller.get_theme()
+        theme_icon = "🌙 Dark Mode" if current_theme == "light" else "☀️ White Mode"
+        self.btn_theme_toggle = QPushButton(theme_icon)
+        self.btn_theme_toggle.setProperty("class", "btn_secondary")
+        self.btn_theme_toggle.setToolTip("Toggle between Clean White Mode and Dark Mode")
+        self.btn_theme_toggle.clicked.connect(self._on_toggle_theme)
+        layout.addWidget(self.btn_theme_toggle)
+
         # Switch to Floating Assistant button
-        self.btn_floating_mode = QPushButton("Floating Mode 🗗")
+        self.btn_floating_mode = QPushButton("🗗 Floating Mini")
         self.btn_floating_mode.setProperty("class", "btn_secondary")
         self.btn_floating_mode.setToolTip("Switch to compact Floating AI Assistant")
         self.btn_floating_mode.clicked.connect(self._on_switch_to_floating)
@@ -209,8 +221,15 @@ class MainWindow(QMainWindow):
 
         return top_bar
 
+    def _on_toggle_theme(self) -> None:
+        """Toggle active UI theme with a single click."""
+        cur = self.controller.get_theme()
+        new_theme = "dark" if cur == "light" else "light"
+        self.controller.set_theme(new_theme)
+        self.btn_theme_toggle.setText("🌙 Dark Mode" if new_theme == "light" else "☀️ White Mode")
+
     def _build_home_page(self) -> QWidget:
-        """Create the dashboard home page with hardware info and database stats."""
+        """Create a clean, welcoming, easy-to-understand Windows home screen."""
         page = QWidget()
         scroll = QScrollArea(page)
         scroll.setWidgetResizable(True)
@@ -218,70 +237,115 @@ class MainWindow(QMainWindow):
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(20)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(22)
 
-        # Welcome Card
+        # 1. Welcome Card
         welcome_frame = QFrame()
         welcome_frame.setProperty("class", "stat_card")
         wf_layout = QVBoxLayout(welcome_frame)
-        title = QLabel("HAKS Personal AI Assistant - Foundation & Desktop UI Active")
-        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #58a6ff;")
+        wf_layout.setContentsMargins(20, 18, 20, 18)
+        wf_layout.setSpacing(6)
+
+        title = QLabel("Welcome to HAKS AI")
+        title.setStyleSheet("font-size: 22px; font-weight: 700; color: #0067c0;")
         desc = QLabel(
-            "Phase 2 Desktop UI is operational. Both Main Window and Floating Assistant share a single controller.\n"
-            "Hardware-calibrated for Dell Inspiron 3576 (Intel i5-7200U, 8 GB RAM, Radeon 520)."
+            "Your personal, private AI assistant built for Windows. "
+            "Chat with intelligent local or cloud models, speak naturally hands-free, "
+            "store your personal preferences, and automate Windows tasks — with complete privacy."
         )
-        desc.setStyleSheet("color: #8b949e; font-size: 13px; line-height: 1.4;")
+        desc.setStyleSheet("color: #4b5563; font-size: 13px; line-height: 1.5;")
         desc.setWordWrap(True)
         wf_layout.addWidget(title)
         wf_layout.addWidget(desc)
         layout.addWidget(welcome_frame)
 
-        # Grid of System Cards
-        grid = QGridLayout()
-        grid.setSpacing(14)
+        # Section Heading
+        lbl_actions = QLabel("QUICK ACTIONS")
+        lbl_actions.setProperty("class", "card_title")
+        layout.addWidget(lbl_actions)
 
-        # Card 1: Hardware Specs
-        c1 = self._create_card(
-            "TARGET HARDWARE",
-            "Intel i5-7200U | 8 GB RAM",
-            "Radeon 520 (2GB) • SSD ~238 GB • Win 10/11"
+        # 2. Grid of Intuitive Action Cards (2x2)
+        grid = QGridLayout()
+        grid.setSpacing(16)
+
+        # Action 1: Chat
+        c1 = self._create_action_card(
+            icon="💬",
+            title="Start a New Chat",
+            desc="Ask questions, write documents, brainstorm ideas, and get instant answers with intelligent AI models.",
+            button_text="Open Chat →",
+            on_click=lambda: self._on_navigate("chat", 1),
         )
         grid.addWidget(c1, 0, 0)
 
-        # Card 2: Storage Architecture
-        c2 = self._create_card(
-            "MEMORY ARCHITECTURE",
-            "5 Independent DBs",
-            "Personal, Work, Conversations, Proposals, Settings"
+        # Action 2: Voice
+        c2 = self._create_action_card(
+            icon="🎙️",
+            title="Voice Assistant",
+            desc="Hands-free speech with wake phrase 'Hey HAKS'. Supports natural conversations in Tamil, English, and Mixed speech.",
+            button_text="Open Voice →",
+            on_click=lambda: self._on_navigate("voice", 5),
         )
         grid.addWidget(c2, 0, 1)
 
-        # Card 3: AI Intelligence
-        c3 = self._create_card(
-            "AI INTELLIGENCE ROUTER",
-            "Hybrid Local + Cloud",
-            "Ollama (Routine/Offline) + Cloud Adapter (Complex)"
+        # Action 3: PC Control
+        c3 = self._create_action_card(
+            icon="🖥️",
+            title="Computer Control",
+            desc="Control Windows with plain language: launch programs, search files, manage processes, and run PowerShell commands safely.",
+            button_text="Control PC →",
+            on_click=lambda: self._on_navigate("control", 7),
         )
         grid.addWidget(c3, 1, 0)
 
-        # Card 4: Voice Pipeline
-        c4 = self._create_card(
-            "VOICE PIPELINE",
-            'Hey HAKS',
-            "Tamil, English & Mixed • Continuous Voice Support"
+        # Action 4: Memory
+        c4 = self._create_action_card(
+            icon="🧠",
+            title="Memory & Preferences",
+            desc="HAKS securely remembers your personal facts, work projects, and settings on your local PC — never shared with third parties.",
+            button_text="View Memory →",
+            on_click=lambda: self._on_navigate("personal_memory", 3),
         )
         grid.addWidget(c4, 1, 1)
 
-        # Card 5: Computer Control & Automation
-        c5 = self._create_card(
-            "WINDOWS COMPUTER CONTROL",
-            "Full Control Active",
-            "CMD & PowerShell • UAC Approval • File/App/Sys Automation"
-        )
-        grid.addWidget(c5, 2, 0, 1, 2)
-
         layout.addLayout(grid)
+
+        # 3. Simple System Status Overview
+        lbl_status_sec = QLabel("SYSTEM OVERVIEW")
+        lbl_status_sec.setProperty("class", "card_title")
+        layout.addWidget(lbl_status_sec)
+
+        status_grid = QGridLayout()
+        status_grid.setSpacing(14)
+
+        s1 = self._create_card("🔒 PRIVACY & STORAGE", "100% On-Device", "Personal memory encrypted locally with SQLite WAL")
+        s2 = self._create_card("⚡ AI ENGINE", "Hybrid Ready", "Local Ollama + Cloud provider fallback with intelligent routing")
+        s3 = self._create_card("🗗 MINI FLOATING WIDGET", "Always Accessible", "Click 'Floating Mini' at the top right to keep HAKS on screen")
+
+        status_grid.addWidget(s1, 0, 0)
+        status_grid.addWidget(s2, 0, 1)
+        status_grid.addWidget(s3, 0, 2)
+        layout.addLayout(status_grid)
+
+        # 4. Quick Tips Card
+        tips_frame = QFrame()
+        tips_frame.setProperty("class", "stat_card")
+        tf_layout = QVBoxLayout(tips_frame)
+        tf_layout.setContentsMargins(16, 12, 16, 12)
+        tf_layout.setSpacing(4)
+        tips_title = QLabel("💡 Quick Tips")
+        tips_title.setStyleSheet("font-weight: 700; color: #111827; font-size: 13px;")
+        tips_text = QLabel(
+            "• In Chat, press Enter to send your message, or Shift+Enter to start a new line.\n"
+            "• Use the 🌙 / ☀️ button in the top bar to easily switch between Clean White Mode and Dark Mode.\n"
+            "• You can type commands like /cmd or /powershell directly into Chat to control your computer."
+        )
+        tips_text.setStyleSheet("color: #4b5563; font-size: 12px; line-height: 1.5;")
+        tf_layout.addWidget(tips_title)
+        tf_layout.addWidget(tips_text)
+        layout.addWidget(tips_frame)
+
         layout.addStretch()
 
         scroll_layout = QVBoxLayout(page)
@@ -290,6 +354,42 @@ class MainWindow(QMainWindow):
         scroll.setWidget(container)
 
         return page
+
+    def _create_action_card(self, icon: str, title: str, desc: str, button_text: str, on_click) -> QFrame:
+        """Create a user-friendly clickable action card for the home screen."""
+        frame = QFrame()
+        frame.setProperty("class", "stat_card")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(8)
+
+        # Header with icon and title
+        hdr = QHBoxLayout()
+        hdr.setSpacing(8)
+        lbl_icon = QLabel(icon)
+        lbl_icon.setStyleSheet("font-size: 22px;")
+        lbl_title = QLabel(title)
+        lbl_title.setStyleSheet("font-size: 16px; font-weight: 700; color: #111827;")
+        hdr.addWidget(lbl_icon)
+        hdr.addWidget(lbl_title)
+        hdr.addStretch()
+        layout.addLayout(hdr)
+
+        # Description
+        lbl_desc = QLabel(desc)
+        lbl_desc.setStyleSheet("color: #4b5563; font-size: 12px; line-height: 1.4;")
+        lbl_desc.setWordWrap(True)
+        layout.addWidget(lbl_desc)
+
+        layout.addSpacing(4)
+
+        # Button
+        btn = QPushButton(button_text)
+        btn.setProperty("class", "btn_primary")
+        btn.clicked.connect(on_click)
+        layout.addWidget(btn)
+
+        return frame
 
     def _create_card(self, title: str, value: str, detail: str) -> QFrame:
         """Helper to create a structured metric card."""
@@ -331,7 +431,10 @@ class MainWindow(QMainWindow):
         self.content_stack.setCurrentIndex(index)
         btn = self._nav_buttons.get(nav_id)
         if btn:
-            self.lbl_page_title.setText(btn.text())
+            # Clean label (strip leading emoji if present for title bar)
+            raw_text = btn.text()
+            title_text = raw_text.split("  ")[-1] if "  " in raw_text else raw_text
+            self.lbl_page_title.setText(title_text)
         if notify_event_bus:
             self.events.navigate_to_page.emit(nav_id)
 
@@ -342,6 +445,12 @@ class MainWindow(QMainWindow):
         self.events.network_connectivity_changed.connect(self._update_network_badge)
         self.events.navigate_to_page.connect(self._on_external_navigate)
         self.events.show_main_window_requested.connect(self._on_show_requested)
+        self.events.theme_changed.connect(self._on_theme_changed)
+
+    def _on_theme_changed(self, theme_name: str) -> None:
+        """Update toggle button label when theme changes externally."""
+        if hasattr(self, "btn_theme_toggle"):
+            self.btn_theme_toggle.setText("🌙 Dark Mode" if theme_name == "light" else "☀️ White Mode")
 
     def _update_status_message(self, message: str) -> None:
         self.lbl_status.setText(message)

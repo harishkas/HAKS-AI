@@ -97,6 +97,98 @@ class WindowsControlManager:
     # 1. Natural-Language & High-Level Execution
     # --------------------------------------------------------------------------
 
+    async def reason_with_gemini(
+        self,
+        instruction: str,
+        ai_manager: Optional[Any] = None,
+        source: str = "chat",
+        working_dir: Optional[str] = None,
+    ) -> ActionPlan:
+        """Use Gemini cloud reasoning to interpret a natural-language Windows control instruction into an ActionPlan."""
+        # 1. Deterministic heuristic interpretation as baseline
+        baseline_plan = self.interpreter.interpret(
+            user_instruction=instruction,
+            source=source,
+            working_dir=working_dir,
+        )
+
+        if ai_manager is None:
+            return baseline_plan
+
+        # 2. Use Gemini to reason about command structure, intent, and parameters
+        prompt = (
+            "You are HAKS Windows Computer Control reasoning engine.\n"
+            "Analyze this user instruction and determine the optimal Windows action plan.\n"
+            f"Instruction: {instruction}\n\n"
+            "Respond in strictly valid JSON with the following schema:\n"
+            "{\n"
+            '  "objective": "short summary of the action",\n'
+            '  "operation_type": "command" or "launch_app" or "file" or "process" or "system",\n'
+            '  "command": "executable or shell command",\n'
+            '  "args": ["optional", "args"],\n'
+            '  "privilege_level": "normal" or "elevated",\n'
+            '  "risk_level": "low" or "sensitive" or "destructive",\n'
+            '  "expected_outcome": "what happens after execution"\n'
+            "}\n"
+            "Do not include markdown fences or any other text, only valid JSON."
+        )
+
+        try:
+            from ai.models import AIMessage
+            resp = await ai_manager.generate(
+                messages=[AIMessage(role="user", content=prompt)],
+                engine_type="cloud",
+                temperature=0.1,
+                num_predict=256,
+                timeout=15.0,
+            )
+            raw = resp.content.strip() if resp and resp.content else ""
+            if raw.startswith("```"):
+                lines = raw.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                raw = "\n".join(lines).strip()
+
+            import json
+            data = json.loads(raw)
+            priv = PrivilegeLevel.ELEVATED if data.get("privilege_level") == "elevated" else PrivilegeLevel.NORMAL
+            risk_val = str(data.get("risk_level", "low")).lower()
+            risk = RiskLevel.LOW
+            if risk_val == "sensitive":
+                risk = RiskLevel.SENSITIVE
+            elif risk_val == "destructive":
+                risk = RiskLevel.DESTRUCTIVE
+            elif risk_val == "blocked":
+                risk = RiskLevel.BLOCKED
+
+            plan = ActionPlan(
+                objective=data.get("objective", baseline_plan.objective or instruction),
+                operation_type=data.get("operation_type", baseline_plan.operation_type or "command"),
+                command=data.get("command", baseline_plan.command or instruction),
+                args=data.get("args", baseline_plan.args),
+                working_dir=working_dir,
+                privilege_level=priv,
+                risk_level=risk,
+                expected_outcome=data.get("expected_outcome", baseline_plan.expected_outcome),
+                source=source,
+            )
+            # Evaluate against execution policy
+            allowed, conf_msg = self.policy.evaluate_plan(plan)
+            if not allowed:
+                plan.risk_level = RiskLevel.BLOCKED
+                plan.confirmation_required = True
+                plan.confirmation_message = conf_msg
+            elif conf_msg:
+                plan.confirmation_required = True
+                plan.confirmation_message = conf_msg
+            logger.info("Gemini reasoned Windows ActionPlan: '%s' [%s]", plan.objective, plan.command)
+            return plan
+        except Exception as exc:
+            logger.warning("Gemini Windows Control reasoning failed: %s. Using baseline plan.", exc)
+            return baseline_plan
+
     async def execute_instruction(
         self,
         instruction: str,

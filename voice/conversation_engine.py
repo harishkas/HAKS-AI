@@ -486,6 +486,7 @@ class ContinuousVoiceEngine:
         messages = self.controller.get_conversation_ai_messages(limit=10)
 
         # 3. Retrieve relevant approved memory context
+        extra_gen_kwargs = {}
         try:
             mem_context = self.controller.context_builder.build_context(
                 query=prompt_text,
@@ -495,16 +496,22 @@ class ContinuousVoiceEngine:
                 min_relevance=0.25,
             )
             if mem_context:
-                from ai.models import AIMessage
-                messages.insert(0, AIMessage(role="system", content=mem_context))
+                extra_gen_kwargs["system_prompt"] = (
+                    "You are HAKS, a helpful, private, local-first personal AI assistant.\n\n"
+                    + mem_context
+                )
         except Exception as mem_exc:
             logger.warning("Could not inject memory context: %s", mem_exc)
 
         # 4. Phase 5 AI Routing & Privacy Policy Enforcement
         ai_mgr = self.controller.get_ai_manager()
-        engine_type = "local"
+        engine_type = "cloud"
         try:
             decision = self.controller.route_request(user_prompt=prompt_text)
+            if decision.is_fallback_needed and decision.fallback_engine is None:
+                err_msg = f"Gemini is currently unavailable ({decision.availability_message}). Please check connectivity or retry."
+                logger.warning("Voice AI Gemini unavailable without auto-fallback: %s", err_msg)
+                return err_msg
             engine_type = decision.selected_engine
             logger.info(
                 "Voice AI Router selected engine: %s (Privacy: %s, Complexity: %s)",
@@ -521,6 +528,7 @@ class ContinuousVoiceEngine:
             response = await ai_mgr.generate(
                 messages=messages,
                 engine_type=engine_type,
+                **extra_gen_kwargs,
             )
             resp_content = response.content.strip() if response and response.content else ""
 

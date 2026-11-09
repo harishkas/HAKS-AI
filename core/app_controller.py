@@ -157,7 +157,7 @@ class AppController:
     def set_theme(self, theme_name: str) -> None:
         """Update and broadcast active theme."""
         if theme_name not in ("dark", "light"):
-            theme_name = "dark"
+            theme_name = "light"
         self._current_theme = theme_name
         self.set_setting("theme", theme_name, section="ui")
         self.events.theme_changed.emit(theme_name)
@@ -358,11 +358,91 @@ class AppController:
                 self._ai_manager.set_active_engine(saved_engine)
             except Exception as exc:
                 logger.warning("Failed setting initial active AI engine '%s': %s", saved_engine, exc)
+            # Synchronize stored hardware limits to local engine
+            try:
+                limits = self.get_local_model_settings()
+                if hasattr(self._ai_manager, "local_engine") and hasattr(self._ai_manager.local_engine, "update_hardware_limits"):
+                    self._ai_manager.local_engine.update_hardware_limits(**limits)
+            except Exception as exc:
+                logger.warning("Failed synchronizing local hardware limits: %s", exc)
         return self._ai_manager
 
+    def get_local_model_settings(self) -> dict[str, Any]:
+        """Fetch persisted hardware-aware local model limits from settings.db with defaults."""
+        raw_ctx = self.get_setting("local_num_ctx", str(getattr(self.config.ai, "local_num_ctx", 2048)))
+        raw_predict = self.get_setting("local_num_predict", str(getattr(self.config.ai, "local_num_predict", 128)))
+        raw_temp = self.get_setting("local_temperature", str(getattr(self.config.ai, "local_temperature", 0.3)))
+        raw_threads = self.get_setting("local_cpu_threads", str(getattr(self.config.ai, "local_cpu_threads", 2)))
+        raw_penalty = self.get_setting("local_repeat_penalty", str(getattr(self.config.ai, "local_repeat_penalty", 1.15)))
+
+        try:
+            num_ctx = int(raw_ctx)
+        except ValueError:
+            num_ctx = 2048
+        try:
+            num_predict = int(raw_predict)
+        except ValueError:
+            num_predict = 128
+        try:
+            temperature = float(raw_temp)
+        except ValueError:
+            temperature = 0.3
+        try:
+            cpu_threads = int(raw_threads)
+        except ValueError:
+            cpu_threads = 2
+        try:
+            repeat_penalty = float(raw_penalty)
+        except ValueError:
+            repeat_penalty = 1.15
+
+        return {
+            "num_ctx": num_ctx,
+            "num_predict": num_predict,
+            "temperature": temperature,
+            "cpu_threads": cpu_threads,
+            "repeat_penalty": repeat_penalty,
+        }
+
+    def set_local_model_settings(
+        self,
+        num_ctx: int,
+        num_predict: int,
+        temperature: float,
+        cpu_threads: int,
+        repeat_penalty: float = 1.15,
+    ) -> None:
+        """Persist hardware-aware local model limits and sync to local engine."""
+        self.set_setting("local_num_ctx", str(num_ctx), section="ai_local")
+        self.set_setting("local_num_predict", str(num_predict), section="ai_local")
+        self.set_setting("local_temperature", str(temperature), section="ai_local")
+        self.set_setting("local_cpu_threads", str(cpu_threads), section="ai_local")
+        self.set_setting("local_repeat_penalty", str(repeat_penalty), section="ai_local")
+
+        # Synchronize with active AI manager's local engine
+        if hasattr(self, "_ai_manager") and self._ai_manager is not None:
+            local_engine = getattr(self._ai_manager, "local_engine", None)
+            if local_engine and hasattr(local_engine, "update_hardware_limits"):
+                local_engine.update_hardware_limits(
+                    num_ctx=num_ctx,
+                    num_predict=num_predict,
+                    temperature=temperature,
+                    cpu_threads=cpu_threads,
+                    repeat_penalty=repeat_penalty,
+                )
+
+        logger.info(
+            "Persisted local model settings: num_ctx=%d, num_predict=%d, temp=%.2f, threads=%d, penalty=%.2f",
+            num_ctx, num_predict, temperature, cpu_threads, repeat_penalty
+        )
+
+
     def get_selected_ai_engine(self) -> str:
-        """Get the active AI engine ('local' or 'cloud')."""
-        return self.get_setting("active_ai_engine", self.config.ai.default_engine)
+        """Get the active AI engine ('local' or 'cloud'). Defaults to 'cloud' (Gemini)."""
+        engine = self.get_setting("active_ai_engine", getattr(self.config.ai, "default_engine", "cloud"))
+        if not engine or engine not in ("local", "cloud"):
+            return "cloud"
+        return engine
 
     def set_selected_ai_engine(self, engine_type: str) -> None:
         """Set and persist active AI engine ('local' or 'cloud')."""
@@ -385,6 +465,7 @@ class AppController:
                 complexity_classifier=self.complexity_classifier,
                 redactor=self.redactor,
                 consent_manager=self.consent_manager,
+                config=self.config,
             )
         return self._router
 
@@ -418,30 +499,40 @@ class AppController:
             is_online=is_online,
         )
 
-    def get_conversation_ai_messages(self, conv_id: Optional[str] = None, limit: int = 20) -> list[Any]:
-        """Convert stored conversation messages into typed AIMessage objects for AI context.
+    def get_conversation_ai_messages(
+        self,
+        conv_id: Optional[str] = None,
+        limit: int = 15,
+        max_total_tokens: Optional[int] = None,
+    ) -> list[Any]:
+        """Convert stored conversation messages into typed AIMessage objects with token budgeting.
 
-        Privacy guarantee: Sends ONLY conversation messages.
-        Does NOT automatically append Personal or Work Memory databases.
+        - Preserves the current user request and essential action results.
+        - Truncates oversized tool/action outputs safely.
+        - Removes redundant and consecutive duplicate messages.
+        - Enforces hardware-aware token budgets to prevent Ollama token-limit errors.
         """
-        from ai.models import AIMessage
+        from ai.models import AIMessage, estimate_tokens
         target_id = conv_id or self.get_active_conversation_id()
         raw_msgs = self.load_conversation(target_id, emit_event=False)
-        recent = raw_msgs[-limit:] if len(raw_msgs) > limit else raw_msgs
+        if not raw_msgs:
+            return []
+
+        # Target token budget for history: reserve space for system prompt and generation
+        local_settings = self.get_local_model_settings()
+        num_ctx = local_settings.get("num_ctx", 2048)
+        num_predict = local_settings.get("num_predict", 128)
+        if max_total_tokens is None:
+            max_total_tokens = max(512, num_ctx - num_predict - 350)
 
         VALID_AI_ROLES = {"user", "assistant", "system"}
-        ai_msgs = []
-        for m in recent:
+        filtered: list[dict] = []
+        for m in raw_msgs:
             role = m["role"]
             content = m["content"]
-            # Skip non-standard roles (e.g. system_error) that Ollama rejects
-            if role not in VALID_AI_ROLES:
-                logger.debug("Skipping message with non-AI role: %s", role)
-                continue
-            if not content or not content.strip():
+            if role not in VALID_AI_ROLES or not content or not content.strip():
                 continue
 
-            # Skip error placeholder messages saved as assistant role
             meta = m.get("metadata")
             if isinstance(meta, str) and meta.strip():
                 try:
@@ -452,21 +543,76 @@ class AppController:
                 meta = {}
 
             if meta.get("error") or content.startswith("I encountered an error") or content.startswith("⚠️"):
-                logger.debug("Skipping error placeholder message from AI context")
                 continue
 
-            # Deduplicate consecutive identical messages to avoid token repeat limit aborts
-            if ai_msgs and ai_msgs[-1].role == role and ai_msgs[-1].content == content:
+            filtered.append(m)
+
+        if not filtered:
+            return []
+
+        # Always identify the latest user request index
+        latest_user_idx = -1
+        for i in range(len(filtered) - 1, -1, -1):
+            if filtered[i]["role"] == "user":
+                latest_user_idx = i
+                break
+
+        # Process candidates working backwards from the latest up to limit & token budget
+        slice_start = max(0, len(filtered) - limit)
+        candidates = filtered[slice_start:]
+
+        selected: list[AIMessage] = []
+        current_token_sum = 0
+
+        for i in range(len(candidates) - 1, -1, -1):
+            cand = candidates[i]
+            role = cand["role"]
+            content = cand["content"].strip()
+            is_current_user = (slice_start + i == latest_user_idx)
+
+            # Truncate oversized tool/action outputs safely
+            if len(content) > 400 and (role == "assistant" or "Output:" in content or "```" in content):
+                lines = content.splitlines()
+                if len(lines) > 10:
+                    summary_head = "\n".join(lines[:6])
+                    tail = "\n".join(lines[-3:])
+                    content = f"{summary_head}\n[... output truncated for context limit ...]\n{tail}"
+                elif len(content) > 500:
+                    content = content[:300] + "\n[... output truncated ...]\n" + content[-150:]
+
+            msg_toks = estimate_tokens(content) + 4
+
+            # If adding this message exceeds token budget, and this is NOT the current user message, stop
+            if not is_current_user and (current_token_sum + msg_toks > max_total_tokens) and selected:
+                logger.debug("Token budget reached (%d tokens), skipping older message", current_token_sum)
                 continue
 
-            ai_msgs.append(
-                AIMessage(
-                    role=role,
-                    content=content,
-                    timestamp=m["timestamp"],
-                )
+            # Deduplicate consecutive identical messages
+            if selected and selected[0].role == role and selected[0].content == content:
+                continue
+
+            selected.insert(0, AIMessage(role=role, content=content, timestamp=cand["timestamp"]))
+            current_token_sum += msg_toks
+
+        # Safeguard: Verify the current user request was never discarded
+        if latest_user_idx != -1:
+            latest_user_cand = filtered[latest_user_idx]
+            has_current_user = any(
+                m.role == "user" and m.timestamp == latest_user_cand["timestamp"]
+                for m in selected
             )
-        return ai_msgs
+            if not has_current_user:
+                u_content = latest_user_cand["content"].strip()
+                if len(u_content) > 1000:
+                    u_content = u_content[:500] + "\n[... truncated ...]\n" + u_content[-300:]
+                selected.append(AIMessage(
+                    role="user",
+                    content=u_content,
+                    timestamp=latest_user_cand["timestamp"],
+                ))
+
+        return selected
+
 
     # --------------------------------------------------------------------------
     # Personal Memory Operations
@@ -839,6 +985,23 @@ class AppController:
     def get_windows_control(self) -> Any:
         """Return the WindowsControlManager subsystem."""
         return self.windows_control
+
+    async def reason_windows_action(
+        self,
+        instruction: str,
+        source: str = "chat",
+        working_dir: Optional[str] = None,
+    ) -> Any:
+        """Reason about a natural-language Windows control instruction using Gemini."""
+        if not hasattr(self, "windows_control") or self.windows_control is None:
+            raise RuntimeError("Windows Control Manager is not available.")
+        ai_mgr = self.get_ai_manager()
+        return await self.windows_control.reason_with_gemini(
+            instruction=instruction,
+            ai_manager=ai_mgr,
+            source=source,
+            working_dir=working_dir,
+        )
 
     async def execute_windows_instruction(
         self,

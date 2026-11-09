@@ -55,7 +55,7 @@ class SettingsView(QWidget):
         # Header
         header = QHBoxLayout()
         title = QLabel("Settings & Privacy")
-        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #f0f6fc;")
+        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #111827;")
         header.addWidget(title)
         header.addStretch()
         layout.addLayout(header)
@@ -135,7 +135,7 @@ class SettingsView(QWidget):
 
         for lvl_name, lvl_desc in levels:
             row = QLabel(f"• <b>{lvl_name}</b>: {lvl_desc}")
-            row.setStyleSheet("color: #e6edf3; font-size: 12px; margin: 2px 0;")
+            row.setStyleSheet("color: #111827; font-size: 12px; margin: 2px 0;")
             sc_layout.addWidget(row)
 
         layout.addWidget(sec_card)
@@ -153,7 +153,7 @@ class SettingsView(QWidget):
         cur_data_dir = self.controller.get_storage_path()
         loc_row = QHBoxLayout()
         self.lbl_storage_path = QLabel(f"<b>Persistent Location:</b> <code>{cur_data_dir}</code>")
-        self.lbl_storage_path.setStyleSheet("color: #e6edf3; font-size: 12px;")
+        self.lbl_storage_path.setStyleSheet("color: #111827; font-size: 12px;")
         loc_row.addWidget(self.lbl_storage_path)
         loc_row.addStretch()
 
@@ -165,7 +165,7 @@ class SettingsView(QWidget):
 
         # Domain breakdown
         domains_title = QLabel("<b>Independent Storage Domains & Status:</b>")
-        domains_title.setStyleSheet("color: #8b949e; font-size: 11px; margin-top: 4px;")
+        domains_title.setStyleSheet("color: #4b5563; font-size: 11px; margin-top: 4px;")
         dc_layout.addWidget(domains_title)
 
         stats = self.controller.db.get_stats()
@@ -184,7 +184,7 @@ class SettingsView(QWidget):
         for d_num, d_path, d_data in domains_info:
             kb = d_data.get("size_bytes", 0) / 1024.0
             lbl = QLabel(f"• <b>{d_num}</b> — <code>{d_path}</code> ({kb:.1f} KB) | {d_data.get('tables', {})}")
-            lbl.setStyleSheet("color: #8b949e; font-size: 11px;")
+            lbl.setStyleSheet("color: #4b5563; font-size: 11px;")
             dc_layout.addWidget(lbl)
 
         # Action Buttons Row

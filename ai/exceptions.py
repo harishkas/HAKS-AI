@@ -36,3 +36,16 @@ class ProviderNotConfiguredError(AIEngineError):
 
 class GenerationCancelledError(AIEngineError):
     """Raised when inference is aborted by the user."""
+
+
+class TokenLimitError(AIEngineError):
+    """Raised when the local model reaches its token limit or token repeat limit during prediction."""
+
+
+class ContextOverflowError(AIEngineError):
+    """Raised when the prompt context exceeds the model's context window limit (num_ctx)."""
+
+
+class EmptyResponseError(AIEngineError):
+    """Raised when the AI engine returns an empty completion or stream."""
+

@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QInputDialog,
     QScrollArea,
+    QSpinBox,
+    QDoubleSpinBox,
 )
 
 from ai.credentials import get_credential_manager
@@ -66,9 +68,9 @@ class AIEngineView(QWidget):
         header = QHBoxLayout()
         title_box = QVBoxLayout()
         title = QLabel("AI Engine & Integration Management")
-        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #f0f6fc;")
+        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #111827;")
         subtitle = QLabel("Local AI (Ollama) + Secure Multi-Provider Cloud Adapter")
-        subtitle.setStyleSheet("color: #8b949e; font-size: 12px;")
+        subtitle.setStyleSheet("color: #4b5563; font-size: 12px;")
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
         header.addLayout(title_box)
@@ -77,7 +79,7 @@ class AIEngineView(QWidget):
 
         # Routing Policy Selector
         lbl_routing = QLabel("Routing Policy:")
-        lbl_routing.setStyleSheet("color: #8b949e; font-size: 12px; font-weight: 600;")
+        lbl_routing.setStyleSheet("color: #4b5563; font-size: 12px; font-weight: 600;")
         header.addWidget(lbl_routing)
 
         self.combo_default_routing_mode = QComboBox()
@@ -89,7 +91,7 @@ class AIEngineView(QWidget):
 
         # Default engine selector
         lbl_def = QLabel("Default Engine:")
-        lbl_def.setStyleSheet("color: #8b949e; font-size: 12px; font-weight: 600;")
+        lbl_def.setStyleSheet("color: #4b5563; font-size: 12px; font-weight: 600;")
         header.addWidget(lbl_def)
 
         self.combo_default_engine = QComboBox()
@@ -121,7 +123,7 @@ class AIEngineView(QWidget):
         lc_title.setProperty("class", "card_title")
         self.lc_status = QLabel("Checking Ollama...")
         self.lc_status.setProperty("class", "card_value")
-        self.lc_status.setStyleSheet("font-size: 14px; font-weight: 600; color: #8b949e;")
+        self.lc_status.setStyleSheet("font-size: 14px; font-weight: 600; color: #4b5563;")
 
         lc_desc = QLabel("Offline, private, low-latency execution directly on your device CPU.")
         lc_desc.setProperty("class", "card_detail")
@@ -133,12 +135,12 @@ class AIEngineView(QWidget):
             "Warning: Models > 3.8 GB (7B+) are restricted to prevent RAM exhaustion and OS freezing."
         )
         hw_banner.setStyleSheet(
-            "background-color: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 8px 10px; color: #58a6ff; font-size: 11px;"
+            "background-color: #eff6ff; border: 1px solid #93c5fd; border-radius: 6px; padding: 8px 10px; color: #0067c0; font-size: 11px;"
         )
 
         # Active Model Selector row
         lc_model_lbl = QLabel("Active Local Model:")
-        lc_model_lbl.setStyleSheet("font-weight: 600; color: #c9d1d9; font-size: 12px;")
+        lc_model_lbl.setStyleSheet("font-weight: 600; color: #111827; font-size: 12px;")
         self.local_model_combo = QComboBox()
         self.local_model_combo.currentIndexChanged.connect(self._on_local_model_changed)
 
@@ -160,12 +162,12 @@ class AIEngineView(QWidget):
 
         # Model Puller Section
         pull_sep = QLabel("Install / Pull Model:")
-        pull_sep.setStyleSheet("font-weight: 600; color: #c9d1d9; font-size: 12px; margin-top: 6px;")
+        pull_sep.setStyleSheet("font-weight: 600; color: #111827; font-size: 12px; margin-top: 6px;")
 
         # Quick-pull buttons for recommended models
         quick_row = QHBoxLayout()
         quick_lbl = QLabel("Presets:")
-        quick_lbl.setStyleSheet("color: #8b949e; font-size: 11px;")
+        quick_lbl.setStyleSheet("color: #4b5563; font-size: 11px;")
         quick_row.addWidget(quick_lbl)
 
         self.btn_preset_1b = QPushButton("llama3.2:1b")
@@ -202,7 +204,7 @@ class AIEngineView(QWidget):
 
         pull_status_row = QHBoxLayout()
         self.lbl_pull_status = QLabel("")
-        self.lbl_pull_status.setStyleSheet("color: #58a6ff; font-size: 11px;")
+        self.lbl_pull_status.setStyleSheet("color: #0067c0; font-size: 11px;")
         self.btn_cancel_pull = QPushButton("Cancel")
         self.btn_cancel_pull.setProperty("class", "btn_danger")
         self.btn_cancel_pull.setVisible(False)
@@ -211,7 +213,7 @@ class AIEngineView(QWidget):
         pull_status_row.addWidget(self.btn_cancel_pull)
 
         lc_url_lbl = QLabel("Ollama API Endpoint:")
-        lc_url_lbl.setStyleSheet("color: #8b949e; font-size: 11px;")
+        lc_url_lbl.setStyleSheet("color: #4b5563; font-size: 11px;")
         self.local_url_input = QLineEdit(self.controller.config.ai.ollama_base_url)
         self.local_url_input.setReadOnly(True)
 
@@ -227,6 +229,73 @@ class AIEngineView(QWidget):
         lc_layout.addLayout(pull_input_row)
         lc_layout.addWidget(self.pull_progress_bar)
         lc_layout.addLayout(pull_status_row)
+        # Hardware-Aware Limits Section
+        hw_limits_box = QFrame()
+        hw_limits_box.setStyleSheet("background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px;")
+        hw_limits_layout = QVBoxLayout(hw_limits_box)
+        hw_limits_layout.setSpacing(8)
+
+        hw_lbl = QLabel("⚙️ Hardware-Aware Inference Limits (8 GB RAM / Dual-Core CPU):")
+        hw_lbl.setStyleSheet("font-weight: 600; color: #0067c0; font-size: 12px;")
+        hw_limits_layout.addWidget(hw_lbl)
+
+        grid_limits = QGridLayout()
+        grid_limits.setSpacing(8)
+
+        # num_ctx
+        lbl_ctx = QLabel("Context Window (num_ctx):")
+        lbl_ctx.setStyleSheet("color: #111827; font-size: 11px;")
+        self.spin_num_ctx = QSpinBox()
+        self.spin_num_ctx.setRange(512, 32768)
+        self.spin_num_ctx.setSingleStep(256)
+        self.spin_num_ctx.setValue(2048)
+        grid_limits.addWidget(lbl_ctx, 0, 0)
+        grid_limits.addWidget(self.spin_num_ctx, 0, 1)
+
+        # num_predict
+        lbl_predict = QLabel("Max Predict Tokens (num_predict):")
+        lbl_predict.setStyleSheet("color: #111827; font-size: 11px;")
+        self.spin_num_predict = QSpinBox()
+        self.spin_num_predict.setRange(16, 2048)
+        self.spin_num_predict.setSingleStep(16)
+        self.spin_num_predict.setValue(128)
+        grid_limits.addWidget(lbl_predict, 0, 2)
+        grid_limits.addWidget(self.spin_num_predict, 0, 3)
+
+        # temperature
+        lbl_temp = QLabel("Temperature:")
+        lbl_temp.setStyleSheet("color: #111827; font-size: 11px;")
+        self.spin_temperature = QDoubleSpinBox()
+        self.spin_temperature.setRange(0.0, 1.5)
+        self.spin_temperature.setSingleStep(0.05)
+        self.spin_temperature.setValue(0.30)
+        grid_limits.addWidget(lbl_temp, 1, 0)
+        grid_limits.addWidget(self.spin_temperature, 1, 1)
+
+        # cpu_threads
+        lbl_threads = QLabel("CPU Threads:")
+        lbl_threads.setStyleSheet("color: #111827; font-size: 11px;")
+        self.spin_cpu_threads = QSpinBox()
+        self.spin_cpu_threads.setRange(1, 16)
+        self.spin_cpu_threads.setValue(2)
+        grid_limits.addWidget(lbl_threads, 1, 2)
+        grid_limits.addWidget(self.spin_cpu_threads, 1, 3)
+
+        hw_limits_layout.addLayout(grid_limits)
+
+        # Save button & confirmation label
+        save_limits_row = QHBoxLayout()
+        self.btn_save_limits = QPushButton("Save Hardware Limits")
+        self.btn_save_limits.setProperty("class", "btn_primary")
+        self.btn_save_limits.clicked.connect(self._on_save_hardware_limits)
+        self.lbl_save_limits_status = QLabel("")
+        self.lbl_save_limits_status.setStyleSheet("color: #15803d; font-size: 11px;")
+        save_limits_row.addWidget(self.btn_save_limits)
+        save_limits_row.addWidget(self.lbl_save_limits_status)
+        save_limits_row.addStretch()
+        hw_limits_layout.addLayout(save_limits_row)
+
+        lc_layout.addWidget(hw_limits_box)
         lc_layout.addWidget(lc_url_lbl)
         lc_layout.addWidget(self.local_url_input)
 
@@ -244,14 +313,14 @@ class AIEngineView(QWidget):
         cc_title.setProperty("class", "card_title")
         self.cc_status = QLabel("Provider-Independent Adapter")
         self.cc_status.setProperty("class", "card_value")
-        self.cc_status.setStyleSheet("font-size: 14px; font-weight: 600; color: #8b949e;")
+        self.cc_status.setStyleSheet("font-size: 14px; font-weight: 600; color: #4b5563;")
 
         cc_desc = QLabel("High-complexity reasoning, advanced code analysis, architecture design.")
         cc_desc.setProperty("class", "card_detail")
 
         # Provider combo
         cc_provider_lbl = QLabel("Active Provider:")
-        cc_provider_lbl.setStyleSheet("font-weight: 600; color: #c9d1d9; font-size: 12px;")
+        cc_provider_lbl.setStyleSheet("font-weight: 600; color: #111827; font-size: 12px;")
         self.cloud_provider_combo = QComboBox()
         self.cloud_provider_combo.addItem("Google Gemini API", "gemini")
         self.cloud_provider_combo.addItem("OpenAI API", "openai")
@@ -263,7 +332,7 @@ class AIEngineView(QWidget):
 
         # Endpoint Base URL Row
         self.lbl_cloud_url = QLabel("API Base Endpoint URL:")
-        self.lbl_cloud_url.setStyleSheet("color: #8b949e; font-size: 11px;")
+        self.lbl_cloud_url.setStyleSheet("color: #4b5563; font-size: 11px;")
         url_edit_row = QHBoxLayout()
         self.txt_cloud_base_url = QLineEdit()
         self.btn_save_cloud_url = QPushButton("Apply URL")
@@ -274,15 +343,15 @@ class AIEngineView(QWidget):
 
         # Model combo
         cc_model_lbl = QLabel("Cloud Model:")
-        cc_model_lbl.setStyleSheet("font-weight: 600; color: #c9d1d9; font-size: 12px;")
+        cc_model_lbl.setStyleSheet("font-weight: 600; color: #111827; font-size: 12px;")
         self.cloud_model_combo = QComboBox()
         self.cloud_model_combo.currentIndexChanged.connect(self._on_cloud_model_changed)
 
         # Secure API Key row
         cc_key_lbl = QLabel("Windows Credential Manager API Key:")
-        cc_key_lbl.setStyleSheet("font-weight: 600; color: #c9d1d9; font-size: 12px;")
+        cc_key_lbl.setStyleSheet("font-weight: 600; color: #111827; font-size: 12px;")
         self.lbl_key_status = QLabel("[Not Configured]")
-        self.lbl_key_status.setStyleSheet("color: #d29922; font-family: monospace; font-size: 12px;")
+        self.lbl_key_status.setStyleSheet("color: #b45309; font-family: monospace; font-size: 12px;")
 
         key_btn_row = QHBoxLayout()
         self.btn_set_key = QPushButton("Configure API Key")
@@ -341,7 +410,7 @@ class AIEngineView(QWidget):
         rule4 = QLabel("• Strict Context Boundary: Only explicit conversation messages are transmitted; local memory databases remain strictly on-device.")
 
         for r in (rule1, rule2, rule3, rule4):
-            r.setStyleSheet("color: #e6edf3; font-size: 12px; padding: 2px 0;")
+            r.setStyleSheet("color: #111827; font-size: 12px; padding: 2px 0;")
             r.setWordWrap(True)
             rc_layout.addWidget(r)
 
@@ -371,6 +440,17 @@ class AIEngineView(QWidget):
 
         # Local model list
         self._refresh_local_models()
+
+        # Load hardware-aware local limits
+        if hasattr(self, "spin_num_ctx") and hasattr(self.controller, "get_local_model_settings"):
+            try:
+                limits = self.controller.get_local_model_settings()
+                self.spin_num_ctx.setValue(limits.get("num_ctx", 2048))
+                self.spin_num_predict.setValue(limits.get("num_predict", 128))
+                self.spin_temperature.setValue(limits.get("temperature", 0.3))
+                self.spin_cpu_threads.setValue(limits.get("cpu_threads", 2))
+            except Exception as exc:
+                logger.warning("Failed loading hardware limits: %s", exc)
 
         # Cloud provider
         cloud_prov = mgr.cloud_engine.active_provider_id
@@ -442,10 +522,10 @@ class AIEngineView(QWidget):
         key = self.cred_manager.get_api_key(prov_id)
         if key:
             self.lbl_key_status.setText(f"Active: {self.cred_manager.mask_key(key)}")
-            self.lbl_key_status.setStyleSheet("color: #3fb950; font-family: monospace; font-size: 12px;")
+            self.lbl_key_status.setStyleSheet("color: #15803d; font-family: monospace; font-size: 12px;")
         else:
             self.lbl_key_status.setText("[Not Configured in Windows Credential Manager]")
-            self.lbl_key_status.setStyleSheet("color: #d29922; font-family: monospace; font-size: 12px;")
+            self.lbl_key_status.setStyleSheet("color: #b45309; font-family: monospace; font-size: 12px;")
 
     def _on_default_engine_changed(self, index: int) -> None:
         eng_type = self.combo_default_engine.currentData()
@@ -466,6 +546,23 @@ class AIEngineView(QWidget):
         if model:
             mgr = self.controller.get_ai_manager()
             mgr.cloud_engine.set_model(model)
+
+    def _on_save_hardware_limits(self) -> None:
+        """Persist hardware-aware local limits to settings.db and sync to local engine."""
+        num_ctx = self.spin_num_ctx.value()
+        num_predict = self.spin_num_predict.value()
+        temp = self.spin_temperature.value()
+        threads = self.spin_cpu_threads.value()
+
+        if hasattr(self.controller, "set_local_model_settings"):
+            self.controller.set_local_model_settings(
+                num_ctx=num_ctx,
+                num_predict=num_predict,
+                temperature=temp,
+                cpu_threads=threads,
+            )
+            self.lbl_save_limits_status.setText("✓ Limits saved & synchronized")
+            QTimer.singleShot(3000, lambda: self.lbl_save_limits_status.setText(""))
 
     def _on_save_cloud_base_url(self) -> None:
         """Update provider base URL for custom / configurable endpoints."""
@@ -692,17 +789,17 @@ class AIEngineView(QWidget):
 
                 if loc.is_healthy:
                     self.lc_status.setText(f"● Ollama Connected ({len(loc.available_models)} models installed)")
-                    self.lc_status.setStyleSheet("font-size: 14px; font-weight: 600; color: #3fb950;")
+                    self.lc_status.setStyleSheet("font-size: 14px; font-weight: 600; color: #15803d;")
                 else:
                     self.lc_status.setText("● Ollama Standby / Offline")
-                    self.lc_status.setStyleSheet("font-size: 14px; font-weight: 600; color: #d29922;")
+                    self.lc_status.setStyleSheet("font-size: 14px; font-weight: 600; color: #b45309;")
 
                 if cld.is_healthy:
                     self.cc_status.setText("● Cloud Connected (Authenticated)")
-                    self.cc_status.setStyleSheet("font-size: 14px; font-weight: 600; color: #3fb950;")
+                    self.cc_status.setStyleSheet("font-size: 14px; font-weight: 600; color: #15803d;")
                 else:
                     self.cc_status.setText("● Cloud Standby / Not Configured")
-                    self.cc_status.setStyleSheet("font-size: 14px; font-weight: 600; color: #d29922;")
+                    self.cc_status.setStyleSheet("font-size: 14px; font-weight: 600; color: #b45309;")
             except Exception as exc:
                 logger.debug("Quick health probe error: %s", exc)
 

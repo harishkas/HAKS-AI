@@ -60,9 +60,9 @@ class VoiceView(QWidget):
         header = QHBoxLayout()
         title_box = QVBoxLayout()
         title = QLabel("Voice Assistant")
-        title.setStyleSheet("font-size: 20px; font-weight: 700; color: #f0f6fc;")
+        title.setStyleSheet("font-size: 20px; font-weight: 700; color: #111827;")
         subtitle = QLabel("Continuous bilingual Tamil & English voice conversation engine with barge-in")
-        subtitle.setStyleSheet("color: #8b949e; font-size: 12px;")
+        subtitle.setStyleSheet("color: #4b5563; font-size: 12px;")
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
         header.addLayout(title_box)
@@ -83,23 +83,23 @@ class VoiceView(QWidget):
         sc_layout.setSpacing(8)
 
         self.lbl_wake_phrase = QLabel('Wake Phrase: "Hey HAKS" (ஹே ஹாக்ஸ்)')
-        self.lbl_wake_phrase.setStyleSheet("font-size: 13px; font-weight: 600; color: #58a6ff;")
+        self.lbl_wake_phrase.setStyleSheet("font-size: 13px; font-weight: 600; color: #0067c0;")
         sc_layout.addWidget(self.lbl_wake_phrase, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.lbl_state_display = QLabel("STANDBY")
         self.lbl_state_display.setStyleSheet(
-            "font-size: 28px; font-weight: 800; color: #3fb950; padding: 10px;"
+            "font-size: 28px; font-weight: 800; color: #15803d; padding: 10px;"
         )
         sc_layout.addWidget(self.lbl_state_display, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.lbl_state_desc = QLabel("HAKS is idling and waiting for wake phrase or push-to-talk.")
-        self.lbl_state_desc.setStyleSheet("color: #8b949e; font-size: 12px;")
+        self.lbl_state_desc.setStyleSheet("color: #4b5563; font-size: 12px;")
         sc_layout.addWidget(self.lbl_state_desc, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Live VU Meter (Mic Audio Activity)
         vu_box = QHBoxLayout()
         lbl_vu = QLabel("Mic Level:")
-        lbl_vu.setStyleSheet("color: #8b949e; font-size: 11px;")
+        lbl_vu.setStyleSheet("color: #4b5563; font-size: 11px;")
         self.vu_meter = QProgressBar()
         self.vu_meter.setRange(0, 100)
         self.vu_meter.setValue(0)
@@ -108,12 +108,12 @@ class VoiceView(QWidget):
         self.vu_meter.setStyleSheet(
             """
             QProgressBar {
-                background-color: #21262d;
+                background-color: #f3f4f6;
                 border-radius: 4px;
-                border: 1px solid #30363d;
+                border: 1px solid #d1d5db;
             }
             QProgressBar::chunk {
-                background-color: #3fb950;
+                background-color: #15803d;
                 border-radius: 4px;
             }
             """
@@ -135,12 +135,12 @@ class VoiceView(QWidget):
         cc_layout.addWidget(cc_title)
 
         self.lbl_user_transcript = QLabel("<b>You:</b> <i>(Awaiting speech...)</i>")
-        self.lbl_user_transcript.setStyleSheet("color: #c9d1d9; font-size: 13px; padding: 4px;")
+        self.lbl_user_transcript.setStyleSheet("color: #111827; font-size: 13px; padding: 4px;")
         self.lbl_user_transcript.setWordWrap(True)
         cc_layout.addWidget(self.lbl_user_transcript)
 
         self.lbl_spoken_response = QLabel("<b>HAKS:</b> <i>(Standing by...)</i>")
-        self.lbl_spoken_response.setStyleSheet("color: #58a6ff; font-size: 13px; padding: 4px;")
+        self.lbl_spoken_response.setStyleSheet("color: #0067c0; font-size: 13px; padding: 4px;")
         self.lbl_spoken_response.setWordWrap(True)
         cc_layout.addWidget(self.lbl_spoken_response)
 
@@ -195,7 +195,7 @@ class VoiceView(QWidget):
         # Input device dropdown
         dev_row = QHBoxLayout()
         lbl_mic = QLabel("Microphone Device:")
-        lbl_mic.setStyleSheet("color: #8b949e; font-size: 12px; width: 140px;")
+        lbl_mic.setStyleSheet("color: #4b5563; font-size: 12px; width: 140px;")
         self.combo_devices = QComboBox()
         self.combo_devices.setMinimumWidth(320)
         self.combo_devices.currentIndexChanged.connect(self._on_device_changed)
@@ -207,7 +207,7 @@ class VoiceView(QWidget):
         # Wake word engine selector
         wake_row = QHBoxLayout()
         lbl_ww = QLabel("Wake Word Engine:")
-        lbl_ww.setStyleSheet("color: #8b949e; font-size: 12px; width: 140px;")
+        lbl_ww.setStyleSheet("color: #4b5563; font-size: 12px; width: 140px;")
         self.combo_wake_engine = QComboBox()
         self.combo_wake_engine.addItem("Local Acoustic ('Hey HAKS' - Offline CPU)", "local")
         self.combo_wake_engine.addItem("Picovoice Porcupine (Requires AccessKey & .ppn)", "porcupine")
@@ -220,7 +220,7 @@ class VoiceView(QWidget):
         # Wake sensitivity slider
         sens_row = QHBoxLayout()
         lbl_sens = QLabel("Wake Sensitivity:")
-        lbl_sens.setStyleSheet("color: #8b949e; font-size: 12px; width: 140px;")
+        lbl_sens.setStyleSheet("color: #4b5563; font-size: 12px; width: 140px;")
         self.slider_sens = QSlider(Qt.Orientation.Horizontal)
         self.slider_sens.setRange(10, 100)
         self.slider_sens.setValue(int(self.controller.config.voice.wake_sensitivity * 100))
@@ -246,7 +246,7 @@ class VoiceView(QWidget):
         # Language preference
         lang_row = QHBoxLayout()
         lbl_lang = QLabel("Speech Language:")
-        lbl_lang.setStyleSheet("color: #8b949e; font-size: 12px; width: 140px;")
+        lbl_lang.setStyleSheet("color: #4b5563; font-size: 12px; width: 140px;")
         self.lang_combo = QComboBox()
         self.lang_combo.addItem("Mixed (Tamil + English)", "mixed")
         self.lang_combo.addItem("Tamil Only (தமிழ்)", "ta")
@@ -260,7 +260,7 @@ class VoiceView(QWidget):
         # STT Model Size
         stt_row = QHBoxLayout()
         lbl_stt = QLabel("Whisper Model Size:")
-        lbl_stt.setStyleSheet("color: #8b949e; font-size: 12px; width: 140px;")
+        lbl_stt.setStyleSheet("color: #4b5563; font-size: 12px; width: 140px;")
         self.combo_stt_size = QComboBox()
         self.combo_stt_size.addItem("base (Recommended for i5-7200U, ~140 MB)", "base")
         self.combo_stt_size.addItem("tiny (Fastest CPU latency, ~75 MB)", "tiny")
@@ -274,7 +274,7 @@ class VoiceView(QWidget):
         # TTS Engine & Tamil Voice
         tts_row = QHBoxLayout()
         lbl_tts = QLabel("TTS Voice Engine:")
-        lbl_tts.setStyleSheet("color: #8b949e; font-size: 12px; width: 140px;")
+        lbl_tts.setStyleSheet("color: #4b5563; font-size: 12px; width: 140px;")
         self.combo_tts_engine = QComboBox()
         self.combo_tts_engine.addItem("Microsoft Edge Neural (Authentic Tamil & English)", "edge")
         self.combo_tts_engine.addItem("Windows SAPI (100% Offline Local Speech)", "sapi")
@@ -288,7 +288,7 @@ class VoiceView(QWidget):
         # Speech Speed Slider
         speed_row = QHBoxLayout()
         lbl_speed = QLabel("Speaking Speed:")
-        lbl_speed.setStyleSheet("color: #8b949e; font-size: 12px; width: 140px;")
+        lbl_speed.setStyleSheet("color: #4b5563; font-size: 12px; width: 140px;")
         self.slider_speed = QSlider(Qt.Orientation.Horizontal)
         self.slider_speed.setRange(75, 150)
         self.slider_speed.setValue(int(self.controller.config.voice.speech_speed * 100))
@@ -469,17 +469,17 @@ class VoiceView(QWidget):
     def _update_ui_state(self, state: str) -> None:
         self.lbl_state_display.setText(state)
         state_colors = {
-            "STANDBY": ("#3fb950", "Waiting for wake phrase 'Hey HAKS' or push-to-talk."),
-            "WAKE_DETECTED": ("#58a6ff", "Wake phrase detected! Initializing voice channel..."),
-            "LISTENING": ("#ff7b72", "Microphone actively listening for speech..."),
-            "PROCESSING": ("#d29922", "Voice Activity Detection segmenting audio buffer..."),
-            "THINKING": ("#a371f7", "AI Router processing speech transcript..."),
-            "SPEAKING": ("#2ea043", "Synthesizing Tamil/English audio response..."),
-            "INTERRUPTED": ("#f85149", "Speech interrupted by user barge-in!"),
-            "SLEEP": ("#8b949e", "Voice engine sleeping. Say 'Wake up HAKS' or press Wake Up."),
-            "STOPPED": ("#8b949e", "Voice pipeline stopped. Click 'Start Voice Assistant' above."),
+            "STANDBY": ("#15803d", "Waiting for wake phrase 'Hey HAKS' or push-to-talk."),
+            "WAKE_DETECTED": ("#0067c0", "Wake phrase detected! Initializing voice channel..."),
+            "LISTENING": ("#b91c1c", "Microphone actively listening for speech..."),
+            "PROCESSING": ("#b45309", "Voice Activity Detection segmenting audio buffer..."),
+            "THINKING": ("#6d28d9", "AI Router processing speech transcript..."),
+            "SPEAKING": ("#15803d", "Synthesizing Tamil/English audio response..."),
+            "INTERRUPTED": ("#dc2626", "Speech interrupted by user barge-in!"),
+            "SLEEP": ("#6b7280", "Voice engine sleeping. Say 'Wake up HAKS' or press Wake Up."),
+            "STOPPED": ("#6b7280", "Voice pipeline stopped. Click 'Start Voice Assistant' above."),
         }
-        color, desc = state_colors.get(state, ("#3fb950", "Active"))
+        color, desc = state_colors.get(state, ("#15803d", "Active"))
         self.lbl_state_display.setStyleSheet(
             f"font-size: 28px; font-weight: 800; color: {color}; padding: 10px;"
         )
