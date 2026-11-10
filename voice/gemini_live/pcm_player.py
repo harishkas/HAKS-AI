@@ -1,47 +1,57 @@
-"""Real-time Streaming PCM Audio Player for Gemini Live 24 kHz Output.
+"""Real-time Streaming PCM Player for HAKS Gemini Live.
 
-Plays linear PCM (24,000 Hz, 16-bit mono, little-endian) streamed over WebSockets
-using sounddevice.RawOutputStream with sub-20ms instant barge-in interruption.
+Plays incoming streaming PCM audio chunks (16kHz or 24kHz mono) with low latency.
+Features:
+- Instant thread-safe barge-in interruption and queue clearing without blocking audio threads.
+- Robust jitter buffering: does not abort playback on transient network chunk delays.
+- Response completion tied directly to Gemini `turnComplete` signals.
+- Feeds every rendered speaker audio frame to `SpeakerReferenceTracker` for Acoustic Echo Cancellation.
+- Hardware output device selection.
 """
 
+from collections import deque
 import logging
-import queue
+from queue import Empty, Queue
 import threading
 import time
 from typing import Callable, Optional
 import numpy as np
-
-from voice.echo_cancellation import AcousticEchoSuppressor
 
 try:
     import sounddevice as sd
 except ImportError:
     sd = None
 
+from voice.apm.webrtc_apm import SpeakerReferenceTracker
+
 logger = logging.getLogger("haks.voice.gemini_live.pcm_player")
 
 
-class PCMStreamPlayer:
-    """Thread-safe streaming audio player for 24 kHz 16-bit linear PCM."""
+class PCMPlayer:
+    """Streams live incoming PCM audio chunks through sounddevice with instant barge-in halt."""
 
     def __init__(
         self,
         sample_rate: int = 24000,
         channels: int = 1,
         output_device_index: Optional[int] = None,
-        echo_suppressor: Optional[AcousticEchoSuppressor] = None,
+        reference_tracker: Optional[SpeakerReferenceTracker] = None,
+        min_jitter_chunks: int = 2,
     ) -> None:
         self.sample_rate = sample_rate
         self.channels = channels
         self.output_device_index = output_device_index
-        self.echo_suppressor = echo_suppressor
-        self._volume: float = 1.0
+        self.reference_tracker = reference_tracker
+        self.min_jitter_chunks = min_jitter_chunks
 
-        self._queue: queue.Queue[Optional[bytes]] = queue.Queue()
+        self._queue: Queue[np.ndarray] = Queue(maxsize=300)
         self._is_playing: bool = False
+        self._is_turn_complete: bool = True
+        self._last_chunk_time: float = 0.0
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
-        self._lock = threading.Lock()
+        self._active_stream: Optional[Any] = None
+        self._volume: float = 1.0
 
         # Callbacks
         self.on_playback_started: Optional[Callable[[], None]] = None
@@ -60,143 +70,206 @@ class PCMStreamPlayer:
     def volume(self, val: float) -> None:
         self._volume = max(0.0, min(1.0, val))
 
-    def write_chunk(self, pcm_bytes: bytes) -> None:
-        """Feed a 24 kHz 16-bit PCM chunk to the playback stream."""
-        if not pcm_bytes:
-            return
-
-        with self._lock:
-            self._queue.put(pcm_bytes)
-            if not self._is_playing or self._worker_thread is None or not self._worker_thread.is_alive():
-                self._stop_event.clear()
-                self._is_playing = True
-                self._worker_thread = threading.Thread(
-                    target=self._playback_worker,
-                    name="pcm_stream_worker",
-                    daemon=True,
-                )
-                self._worker_thread.start()
-
     def mark_turn_complete(self) -> None:
-        """Signal that the current assistant turn has ended."""
-        with self._lock:
-            if self._is_playing:
-                # Sentinel None signals end of current stream
-                self._queue.put(None)
+        """Signal from Gemini Live that the model has completed generating audio for this turn."""
+        self._is_turn_complete = True
+        logger.debug("PCMPlayer marked turn complete. Output stream will drain and finalize.")
+
+    def set_output_device(self, device_index: Optional[int]) -> None:
+        """Switch audio output device and halt active stream."""
+        if self.output_device_index != device_index:
+            self.stop()
+            self.output_device_index = device_index
+            logger.info("PCMPlayer output device set to %s", device_index)
+
+    def enqueue_chunk(self, chunk: bytes | np.ndarray, source_sample_rate: Optional[int] = None) -> bool:
+        """Enqueue incoming PCM chunk for immediate playback.
+
+        Args:
+            chunk: Raw PCM bytes (int16 16kHz/24kHz) or numpy array.
+            source_sample_rate: Sample rate if different from player default.
+        """
+        sr = source_sample_rate or self.sample_rate
+
+        # Convert bytes to numpy float32
+        if isinstance(chunk, bytes):
+            audio = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
+        elif isinstance(chunk, np.ndarray):
+            if chunk.dtype == np.int16:
+                audio = chunk.astype(np.float32) / 32768.0
+            else:
+                audio = chunk.astype(np.float32)
+        else:
+            return False
+
+        if len(audio) == 0:
+            return False
+
+        # Resample to player sample rate if needed
+        if sr != self.sample_rate and len(audio) > 1:
+            target_len = int(len(audio) * self.sample_rate / sr)
+            if target_len > 0:
+                indices = np.linspace(0, len(audio) - 1, target_len)
+                audio = np.interp(indices, np.arange(len(audio)), audio).astype(np.float32)
+
+        try:
+            self._is_turn_complete = False
+            self._last_chunk_time = time.time()
+            self._queue.put_nowait(audio)
+            self._ensure_worker_running()
+            return True
+        except Exception:
+            logger.warning("PCMPlayer queue full; dropping frame.")
+            return False
+
+    def _ensure_worker_running(self) -> None:
+        """Start background worker thread if not active."""
+        if self._worker_thread is not None and self._worker_thread.is_alive():
+            if not self._stop_event.is_set():
+                return
+            # Worker is terminating from a previous stop call; join briefly
+            self._worker_thread.join(timeout=0.08)
+
+        self._stop_event.clear()
+        self._worker_thread = threading.Thread(
+            target=self._play_worker,
+            name="pcm_player_worker",
+            daemon=True,
+        )
+        self._worker_thread.start()
 
     def stop(self) -> None:
-        """Instantly halt active playback and flush pending audio (barge-in)."""
-        with self._lock:
-            if not self._is_playing:
-                return
-            logger.info("PCMStreamPlayer: Instant interruption signal received (barge-in).")
-            self._stop_event.set()
+        """Instantly interrupt and halt playback, clear queue, and flush AEC reference non-blocking."""
+        self._stop_event.set()
+        self._is_turn_complete = True
 
-            # Drain queue immediately
-            while not self._queue.empty():
-                try:
-                    self._queue.get_nowait()
-                except queue.Empty:
-                    break
+        # Non-blocking stream abort (instantly halts hardware audio output)
+        stream = self._active_stream
+        if stream is not None:
+            try:
+                stream.abort()
+            except Exception:
+                pass
 
-        if self._worker_thread and self._worker_thread.is_alive():
-            self._worker_thread.join(timeout=0.3)
+        # Drain queue immediately
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+            except Empty:
+                break
+
+        if self.reference_tracker:
+            try:
+                self.reference_tracker.clear()
+            except Exception:
+                pass
 
         self._is_playing = False
-        if self.on_playback_interrupted:
-            try:
-                self.on_playback_interrupted()
-            except Exception as e:
-                logger.error("Error in on_playback_interrupted callback: %s", e)
 
-    def _playback_worker(self) -> None:
-        """Worker thread streaming PCM chunks to sounddevice."""
+    def _play_worker(self) -> None:
+        """Streaming worker pulling chunks and writing to sounddevice."""
         if sd is None:
-            logger.error("sounddevice is not installed; PCM streaming disabled.")
-            self._is_playing = False
+            logger.error("sounddevice library not available; cannot play PCM.")
             return
 
+        self._is_playing = True
         interrupted = False
+
         if self.on_playback_started:
             try:
                 self.on_playback_started()
             except Exception as e:
-                logger.error("Error in on_playback_started callback: %s", e)
+                logger.error("Error in on_playback_started: %s", e)
 
         stream = None
         try:
-            stream = sd.RawOutputStream(
+            # Jitter buffer cushion: wait briefly for initial chunks unless turn completed early
+            wait_start = time.time()
+            while (
+                self._queue.qsize() < self.min_jitter_chunks
+                and not self._is_turn_complete
+                and not self._stop_event.is_set()
+                and (time.time() - wait_start < 0.15)
+            ):
+                time.sleep(0.01)
+
+            block_size = 512
+            stream = sd.OutputStream(
                 samplerate=self.sample_rate,
                 channels=self.channels,
                 device=self.output_device_index,
-                dtype="int16",
-                blocksize=1024,
+                dtype="float32",
+                blocksize=block_size,
             )
             stream.start()
+            self._active_stream = stream
 
+            last_chunk_time = time.time()
+
+            # Process queue with adaptive jitter-tolerant timeout
             while not self._stop_event.is_set():
                 try:
-                    chunk = self._queue.get(timeout=0.2)
-                except queue.Empty:
-                    # If queue empty and turn complete, finish playback
-                    continue
+                    chunk = self._queue.get(timeout=0.05)
+                    last_chunk_time = time.time()
+                except Empty:
+                    # If queue is empty AND Gemini has signaled turnComplete, playback is done!
+                    if self._is_turn_complete:
+                        logger.debug("PCMPlayer finished playing all chunks for completed turn.")
+                        break
 
-                if chunk is None:
-                    # End of turn sentinel received and buffer drained
-                    if not interrupted:
-                        time.sleep(0.06)  # Allow final hardware buffer drain
-                    break
+                    # If turnComplete is not yet received, tolerate transient token-generation delays
+                    # Only time out if idle for > 5.0 seconds
+                    if time.time() - last_chunk_time > 5.0:
+                        logger.warning("PCMPlayer idle timeout (5.0s) waiting for subsequent Gemini chunks.")
+                        break
+                    continue
 
                 if self._stop_event.is_set():
                     interrupted = True
                     break
 
-                # Feed active chunk to echo suppressor reference buffer
-                if self.echo_suppressor is not None:
-                    self.echo_suppressor.feed_playback_chunk(chunk, self.sample_rate)
-
-                # Apply volume scaling if needed
+                # Apply volume scaling
                 if self._volume < 0.99:
-                    arr = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
-                    arr = (arr * self._volume).astype(np.int16)
-                    processed_bytes = arr.tobytes()
-                else:
-                    processed_bytes = chunk
+                    chunk = chunk * self._volume
 
-                # Write out in small chunks to allow responsive interruption
-                block_bytes = 2048  # 1024 samples int16 = ~42ms
-                offset = 0
-                total_len = len(processed_bytes)
+                # Feed rendered speaker frame to SpeakerReferenceTracker for AEC
+                if self.reference_tracker:
+                    self.reference_tracker.push_samples(chunk, source_sample_rate=self.sample_rate)
 
-                while offset < total_len:
+                # Write out in block_size chunks
+                idx = 0
+                total = len(chunk)
+                while idx < total:
                     if self._stop_event.is_set():
                         interrupted = True
                         break
-                    end = min(offset + block_bytes, total_len)
-                    sub_chunk = processed_bytes[offset:end]
-                    stream.write(sub_chunk)
-                    offset = end
+                    sub_end = min(idx + block_size, total)
+                    sub_chunk = chunk[idx:sub_end]
+                    try:
+                        stream.write(sub_chunk)
+                    except Exception as wr_err:
+                        # Aborted or closed
+                        interrupted = True
+                        break
+                    idx = sub_end
 
                 if interrupted:
                     break
 
         except Exception as exc:
-            logger.error("PCM playback worker error: %s", exc)
+            logger.error("PCM streaming playback error: %s", exc)
         finally:
+            self._active_stream = None
             if stream is not None:
                 try:
-                    if interrupted:
-                        stream.abort()
-                    else:
-                        stream.stop()
+                    stream.stop()
                     stream.close()
                 except Exception:
                     pass
 
             self._is_playing = False
-
-            if interrupted:
-                logger.info("PCM playback stopped by interruption.")
+            if interrupted or self._stop_event.is_set():
+                logger.info("PCM playback interrupted.")
                 if self.on_playback_interrupted:
                     try:
                         self.on_playback_interrupted()
@@ -208,4 +281,3 @@ class PCMStreamPlayer:
                         self.on_playback_finished()
                     except Exception as e:
                         logger.error("Error in on_playback_finished: %s", e)
-

@@ -1,156 +1,125 @@
-"""Real-time Microphone Audio Streamer for Gemini Live.
+"""Audio Streamer for HAKS Gemini Live Integration.
 
-Bridges 16 kHz audio capture frames from AudioCaptureService to GeminiLiveClient
-via an asynchronous worker queue.
+Manages formatted, ordered transmission of preprocessed microphone audio frames:
+- Formats 16kHz float32 audio to 16-bit linear PCM mono bytes.
+- Supports pre-roll audio frame injection on speech turn initiation.
+- Bounded asynchronous queue preventing memory buildup during network jitter.
+- Thread-safe non-blocking audio transfer.
 """
-
-import asyncio
-import logging
-from typing import Optional
-import numpy as np
-
-from voice.gemini_live.client import GeminiLiveClient
 
 from collections import deque
 import logging
-from typing import Optional
+from queue import Empty, Full, Queue
+import threading
+from typing import Callable, Optional
 import numpy as np
-
-from voice.gemini_live.client import GeminiLiveClient
 
 logger = logging.getLogger("haks.voice.gemini_live.audio_streamer")
 
 
-class AudioStreamerBridge:
-    """Asynchronously streams microphone PCM frames to an active Gemini Live session."""
+class GeminiAudioStreamer:
+    """Buffers, formats, and transmits clean 16kHz audio frames to Gemini Live."""
 
     def __init__(
         self,
-        client: GeminiLiveClient,
-        loop: Optional[asyncio.AbstractEventLoop] = None,
+        sample_rate: int = 16000,
+        max_queue_frames: int = 300,  # ~9.6 seconds buffer to absorb network jitter
     ) -> None:
-        self.client = client
-        self.loop = loop
-        self._is_streaming: bool = False
-        self._playback_active: bool = False
-        self._held_pre_roll: deque[bytes] = deque(maxlen=8)  # ~256ms of 32ms frames
-        self._queue: Optional[asyncio.Queue[bytes]] = None
-        self._stream_task: Optional[asyncio.Task] = None
+        self.sample_rate = sample_rate
+        self.max_queue_frames = max_queue_frames
+        self.dropped_frames: int = 0
+
+        self._queue: Queue[bytes] = Queue(maxsize=max_queue_frames)
+        self._is_active: bool = False
+        self._lock = threading.Lock()
+        self._send_callback: Optional[Callable[[bytes], None]] = None
+        self._worker_thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
 
     @property
-    def is_streaming(self) -> bool:
-        return self._is_streaming
+    def is_active(self) -> bool:
+        return self._is_active
 
-    @property
-    def is_playback_active(self) -> bool:
-        return self._playback_active
+    def set_send_callback(self, callback: Optional[Callable[[bytes], None]]) -> None:
+        """Register the transmission callback (e.g. WebSocket or API stream)."""
+        self._send_callback = callback
 
-    def set_playback_active(self, active: bool) -> None:
-        """Inform streamer whether assistant speaker output is currently active."""
-        self._playback_active = active
-        if not active:
-            self.flush_held_frames()
-
-    def flush_held_frames(self) -> None:
-        """Push held pre-roll frames into active transmission queue upon barge-in."""
-        if self._queue is not None and self.loop is not None:
-            def _drain():
-                while self._held_pre_roll:
-                    try:
-                        chunk = self._held_pre_roll.popleft()
-                        if self._queue:
-                            self._queue.put_nowait(chunk)
-                    except (IndexError, asyncio.QueueFull):
-                        break
-            if self.loop.is_running():
-                self.loop.call_soon_threadsafe(_drain)
-
-    def start_streaming(self, loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
-        """Begin queueing and transmitting microphone audio to Gemini Live."""
-        if self._is_streaming:
+    def start(self) -> None:
+        """Start audio streaming worker."""
+        if self._is_active:
             return
+        self._is_active = True
+        self._stop_event.clear()
+        self._worker_thread = threading.Thread(
+            target=self._stream_worker,
+            name="gemini_audio_streamer",
+            daemon=True,
+        )
+        self._worker_thread.start()
+        logger.info("Gemini audio streamer started.")
 
-        if loop:
-            self.loop = loop
-        elif self.loop is None:
+    def stop(self) -> None:
+        """Halt streaming and drain queue."""
+        self._is_active = False
+        self._stop_event.set()
+        self.clear()
+        if self._worker_thread and self._worker_thread.is_alive() and threading.current_thread() != self._worker_thread:
+            self._worker_thread.join(timeout=0.5)
+        logger.info("Gemini audio streamer stopped.")
+
+    def clear(self) -> None:
+        """Flush queued audio frames."""
+        while not self._queue.empty():
             try:
-                self.loop = asyncio.get_running_loop()
-            except RuntimeError:
-                logger.error("No active event loop found for AudioStreamerBridge.")
-                return
+                self._queue.get_nowait()
+            except Empty:
+                break
 
-        self._is_streaming = True
-        self._queue = asyncio.Queue(maxsize=100)
-        self._stream_task = self.loop.create_task(self._streaming_worker())
-        logger.info("AudioStreamerBridge: Started streaming microphone frames.")
+    def inject_preroll(self, preroll_frames: list[np.ndarray]) -> None:
+        """Inject preserved pre-roll audio frames ahead of real-time stream.
 
-    def stop_streaming(self) -> None:
-        """Stop transmitting audio to Gemini Live and drain the buffer."""
-        if not self._is_streaming:
-            return
+        Args:
+            preroll_frames: Ordered sequence of 16kHz audio chunks.
+        """
+        for frame in preroll_frames:
+            self.send_frame(frame)
 
-        self._is_streaming = False
-        if self._stream_task and not self._stream_task.done():
-            self._stream_task.cancel()
-            self._stream_task = None
+    def send_frame(self, frame: np.ndarray) -> bool:
+        """Format 16kHz float32 frame to int16 PCM bytes and enqueue for transmission.
 
-        if self._queue:
-            while not self._queue.empty():
-                try:
-                    self._queue.get_nowait()
-                except Exception:
-                    break
-        logger.info("AudioStreamerBridge: Stopped streaming microphone frames.")
+        Args:
+            frame: 1D numpy array of 16kHz float32 audio.
+        """
+        if not self._is_active or len(frame) == 0:
+            return False
 
-    def feed_frame(self, float_frame: np.ndarray) -> None:
-        """Feed a float32 audio capture frame (from AudioCaptureService) into the streamer."""
-        if not self._is_streaming or self._queue is None or self.loop is None:
-            return
+        # Convert float32 [-1.0, 1.0] to 16-bit linear PCM little-endian
+        clipped = np.clip(frame, -1.0, 1.0)
+        pcm_bytes = (clipped * 32767.0).astype(np.int16).tobytes()
 
         try:
-            # Convert float32 [-1.0, 1.0] to 16-bit linear PCM little-endian
-            clamped = np.clip(float_frame, -1.0, 1.0)
-            int16_pcm = (clamped * 32767.0).astype(np.int16).tobytes()
-
-            if self.loop.is_running():
-                self.loop.call_soon_threadsafe(self._put_chunk, int16_pcm)
-        except Exception as exc:
-            logger.debug("Error feeding frame to audio streamer: %s", exc)
-
-    def _put_chunk(self, chunk: bytes) -> None:
-        if self._queue and self._is_streaming:
-            if self._playback_active:
-                # Hold frames in pre-roll buffer during playback to prevent speaker echo reaching Gemini
-                self._held_pre_roll.append(chunk)
-                return
-
+            self._queue.put_nowait(pcm_bytes)
+            return True
+        except Full:
+            logger.debug("Audio streamer queue full; dropping oldest frame.")
             try:
-                self._queue.put_nowait(chunk)
-            except asyncio.QueueFull:
-                # Discard oldest chunk to prevent unbounded buffer delay
+                self._queue.get_nowait()
+                self._queue.put_nowait(pcm_bytes)
+                return True
+            except (Empty, Full):
+                return False
+
+    def _stream_worker(self) -> None:
+        """Background thread executing formatted delivery."""
+        while not self._stop_event.is_set():
+            try:
+                pcm_data = self._queue.get(timeout=0.1)
+            except Empty:
+                continue
+
+            if self._send_callback:
                 try:
-                    self._queue.get_nowait()
-                    self._queue.put_nowait(chunk)
-                except Exception:
-                    pass
-
-    async def _streaming_worker(self) -> None:
-        """Worker task transmitting audio chunks across the WebSocket."""
-        try:
-            while self._is_streaming and self._queue is not None:
-                chunk = await self._queue.get()
-                if not self._is_streaming:
-                    break
-
-                if self.client.is_connected():
-                    await self.client.send_audio_chunk(chunk)
-                else:
-                    await asyncio.sleep(0.05)
-
-        except asyncio.CancelledError:
-            pass
-        except Exception as exc:
-            logger.error("Audio streamer worker failed: %s", exc)
-        finally:
-            self._is_streaming = False
+                    self._send_callback(pcm_data)
+                except Exception as exc:
+                    logger.error("Error transmitting audio chunk to Gemini Live: %s", exc)
 

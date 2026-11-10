@@ -6,7 +6,10 @@ system-wide resource discovery, and hardware-aware capacity evaluation
 under full control execution mode with native UAC elevation and immutable audit trails.
 """
 
+from windows_control.application_controller import ApplicationActionResult, ApplicationController
+from windows_control.application_intents import AppActionType, ApplicationIntent, ApplicationIntentParser
 from windows_control.application_manager import ApplicationManager
+from windows_control.application_registry import ApplicationEntry, ApplicationRegistry
 from windows_control.audit_logger import AuditLogger
 from windows_control.cmd_service import CMDService
 from windows_control.command_executor import CommandExecutor
@@ -18,6 +21,7 @@ from windows_control.filesystem_service import FilesystemService
 from windows_control.gui_automation import GUIAutomationService
 from windows_control.hardware_profiler import SystemHardwareProfiler
 from windows_control.manager import WindowsControlManager
+from windows_control.window_manager import WindowInfo, WindowManager
 from windows_control.models import (
     ActionPlan,
     AudioDeviceInfo,
@@ -53,7 +57,14 @@ from windows_control.system_manager import SystemManager
 
 __all__ = [
     "ActionPlan",
+    "AppActionType",
+    "ApplicationActionResult",
+    "ApplicationController",
+    "ApplicationEntry",
+    "ApplicationIntent",
+    "ApplicationIntentParser",
     "ApplicationManager",
+    "ApplicationRegistry",
     "AudioDeviceInfo",
     "AuditLogRecord",
     "AuditLogger",
@@ -93,5 +104,7 @@ __all__ = [
     "SystemHardwareProfiler",
     "SystemManager",
     "SystemResourceDiscoveryService",
+    "WindowInfo",
+    "WindowManager",
     "WindowsControlManager",
 ]

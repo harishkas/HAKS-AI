@@ -202,6 +202,18 @@ class VoiceConfig(BaseModel):
     speech_speed: float = 1.0
     speech_volume: float = 1.0
     enable_barge_in: bool = True
+    # Advanced VAD & WebRTC Audio Processing Configuration
+    vad_engine: Literal["silero", "webrtc"] = "silero"
+    silero_threshold: float = 0.55
+    min_speech_duration_ms: int = 150
+    speech_confirmation_ms: int = 150
+    end_of_speech_silence_ms: int = 450
+    pre_roll_ms: int = 300
+    enable_aec: bool = True
+    enable_ns: bool = True
+    enable_agc: bool = False
+    ns_level: int = 2
+    stream_delay_ms: int = 40
 
 
 class SecurityConfig(BaseModel):

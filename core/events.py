@@ -33,8 +33,7 @@ class ApplicationEvents(QObject):
     voice_transcript_received = Signal(str, str)  # (text, language)
     voice_mute_toggled = Signal(bool)  # is_muted
     voice_audio_level_updated = Signal(float)  # 0.0 to 1.0 live mic VU meter
-    voice_speech_confidence_updated = Signal(float)  # 0.0 to 1.0 live speech confidence
-    voice_noise_floor_updated = Signal(float)  # dynamic noise floor level
+    voice_speech_prob_updated = Signal(float)  # 0.0 to 1.0 live human speech probability
     voice_speech_started = Signal()
     voice_speech_ended = Signal()
     voice_speaking_started = Signal(str)  # text being spoken

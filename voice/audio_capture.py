@@ -8,6 +8,7 @@ Calibrated for 16,000 Hz mono float32 audio.
 from collections import deque
 import logging
 import threading
+import time
 from typing import Callable, Optional
 import numpy as np
 
@@ -51,7 +52,7 @@ class AudioCaptureService:
         self._confidence_callbacks: list[Callable[[float], None]] = []
 
         self._current_audio_level: float = 0.0
-        self._current_speech_confidence: float = 0.0
+        self._last_level_emit_time: float = 0.0
 
     @property
     def is_capturing(self) -> bool:
@@ -227,6 +228,7 @@ class AudioCaptureService:
             except Exception as e:
                 logger.error("Error in audio chunk callback: %s", e)
 
+        # Dispatch to level callbacks
         for lvl_cb in list(self._level_callbacks):
             try:
                 lvl_cb(level)

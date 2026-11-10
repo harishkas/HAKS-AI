@@ -1,18 +1,14 @@
-"""Gemini Live Native Real-time Speech-to-Speech Subsystem for HAKS.
+"""Gemini Live Bidirectional Streaming Voice Architecture for HAKS.
 
-Provides bidirectional asynchronous WebSocket audio streaming using Google's
-Gemini Live API (gemini-3.8-live), 24 kHz low-latency linear PCM playback,
-and instant barge-in interruption.
+Includes:
+- GeminiLiveClient: Persistent bidirectional session manager with privacy enforcement.
+- GeminiAudioStreamer: 16kHz audio chunk queue and streamer with pre-roll forwarding.
+- PCMPlayer: Real-time PCM audio streaming player with AEC render reference feeding.
 """
 
-from voice.gemini_live.client import GeminiLiveClient, LiveConnectionStatus
-from voice.gemini_live.pcm_player import PCMStreamPlayer
-from voice.gemini_live.audio_streamer import AudioStreamerBridge
+from voice.gemini_live.pcm_player import PCMPlayer
+from voice.gemini_live.audio_streamer import GeminiAudioStreamer
+from voice.gemini_live.client import GeminiLiveClient
 
-__all__ = [
-    "GeminiLiveClient",
-    "LiveConnectionStatus",
-    "PCMStreamPlayer",
-    "AudioStreamerBridge",
-]
+__all__ = ["PCMPlayer", "GeminiAudioStreamer", "GeminiLiveClient"]
 

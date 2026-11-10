@@ -2,13 +2,14 @@
 
 Decodes MP3, WAV, and audio formats using PyAV (`av`) and streams through
 `sounddevice.OutputStream` in responsive 40ms blocks with instant barge-in halt.
+Features non-blocking interruption without stalling real-time PortAudio threads.
 """
 
 import logging
 from pathlib import Path
 import threading
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 import numpy as np
 
 try:
@@ -27,13 +28,14 @@ class AudioPlayerService:
     def __init__(
         self,
         output_device_index: Optional[int] = None,
-        echo_suppressor: Optional[object] = None,
+        reference_tracker: Optional[Any] = None,
     ) -> None:
         self.output_device_index = output_device_index
-        self.echo_suppressor = echo_suppressor
+        self.reference_tracker = reference_tracker
         self._is_playing: bool = False
         self._stop_event = threading.Event()
         self._playback_thread: Optional[threading.Thread] = None
+        self._active_stream: Optional[Any] = None
         self._volume: float = 1.0
 
         # Callbacks
@@ -54,12 +56,25 @@ class AudioPlayerService:
         self._volume = max(0.0, min(1.0, val))
 
     def stop(self) -> None:
-        """Instantly interrupt and halt active audio playback."""
+        """Instantly interrupt and halt active audio playback without blocking calling thread."""
         if self._is_playing:
             logger.info("Interrupting audio playback (barge-in signal)...")
             self._stop_event.set()
-            if self._playback_thread and self._playback_thread.is_alive():
-                self._playback_thread.join(timeout=1.0)
+
+            # Abort active sounddevice stream immediately (non-blocking)
+            stream = self._active_stream
+            if stream is not None:
+                try:
+                    stream.abort()
+                except Exception:
+                    pass
+
+            if self.reference_tracker:
+                try:
+                    self.reference_tracker.clear()
+                except Exception:
+                    pass
+
             self._is_playing = False
 
     def play_file(self, file_path: str | Path, block: bool = False) -> bool:
@@ -101,6 +116,7 @@ class AudioPlayerService:
             except Exception as e:
                 logger.error("Error in on_playback_started: %e", e)
 
+        stream = None
         try:
             # Open and decode container with PyAV
             container = av.open(str(path))
@@ -122,6 +138,7 @@ class AudioPlayerService:
                 blocksize=block_size,
             )
             stream.start()
+            self._active_stream = stream
 
             try:
                 for frame in container.decode(audio_stream):
@@ -134,7 +151,6 @@ class AudioPlayerService:
 
                     # Transpose if necessary: sounddevice expects (frames, channels)
                     if pcm_array.ndim == 2:
-                        # PyAV can be (channels, frames)
                         if pcm_array.shape[0] == channels:
                             pcm_array = pcm_array.T
 
@@ -157,27 +173,36 @@ class AudioPlayerService:
                             break
                         chunk_end = min(idx + block_size, total_samples)
                         chunk = audio_floats[idx:chunk_end]
-                        if self.echo_suppressor is not None and hasattr(self.echo_suppressor, "feed_playback_chunk"):
-                            chunk_b = (np.clip(chunk, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
-                            self.echo_suppressor.feed_playback_chunk(chunk_b, sample_rate)
-                        stream.write(chunk)
+                        if self.reference_tracker:
+                            try:
+                                self.reference_tracker.push_samples(chunk, source_sample_rate=sample_rate)
+                            except Exception:
+                                pass
+                        try:
+                            stream.write(chunk)
+                        except Exception:
+                            interrupted = True
+                            break
                         idx = chunk_end
 
                     if interrupted:
                         break
             finally:
-                try:
-                    stream.stop()
-                    stream.close()
-                except Exception:
-                    pass
+                self._active_stream = None
+                if stream is not None:
+                    try:
+                        stream.stop()
+                        stream.close()
+                    except Exception:
+                        pass
                 container.close()
 
         except Exception as exc:
             logger.error("Audio playback error: %s", exc)
         finally:
+            self._active_stream = None
             self._is_playing = False
-            if interrupted:
+            if interrupted or self._stop_event.is_set():
                 logger.info("Playback interrupted.")
                 if self.on_playback_interrupted:
                     try:

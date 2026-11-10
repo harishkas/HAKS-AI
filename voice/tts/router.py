@@ -54,6 +54,13 @@ class LanguageAwareTTSRouter:
             return "ta"
         return "en"
 
+    def resolve_voice(self, text: str) -> str:
+        """Resolve the appropriate voice name based on language detection."""
+        lang = self.detect_language(text)
+        if lang in ("ta", "mixed"):
+            return self.config.voice.tts_tamil_voice
+        return self.config.voice.tts_english_voice
+
     def get_all_available_voices(self) -> list[TTSVoiceInfo]:
         """Aggregate available voices across all engines."""
         voices = []

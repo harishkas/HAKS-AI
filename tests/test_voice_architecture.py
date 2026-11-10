@@ -393,7 +393,15 @@ async def test_speech_turn_integration_with_ai_and_memory(
     )
     engine.stt.transcribe = MagicMock(return_value=mock_transcription)
 
-    # Mock AI manager to return response with memory context
+    # Mock AI manager and routing to return response with memory context
+    controller.route_request = MagicMock(
+        return_value=MagicMock(
+            selected_engine="local",
+            is_fallback_needed=False,
+            privacy_level="PUBLIC",
+            complexity_level="SIMPLE",
+        )
+    )
     controller.get_ai_manager().generate = AsyncMock(
         return_value=AIResponse(
             content="Your preference is Tamil classical songs.",
