@@ -220,6 +220,7 @@ class ContinuousVoiceEngine:
         self.gemini_live.pcm_player.on_playback_interrupted = self._on_player_interrupted
         self.gemini_live.on_server_interrupted = self._handle_server_interrupted
         self.gemini_live.on_turn_completed = self._on_gemini_turn_completed
+        self.gemini_live.on_tool_call = self._handle_gemini_tool_call
 
         # Wire Interruption Controller confirmation callback
         self.interruption_controller.on_interruption_confirmed = self._on_interruption_confirmed
@@ -402,6 +403,95 @@ class ContinuousVoiceEngine:
         logger.info("Received server-side VAD interruption signal from Gemini Live.")
         self.interruption_controller.handle_server_interruption()
 
+    def _handle_gemini_tool_call(self, tool_call: dict[str, Any]) -> None:
+        """Handle structured tool calls from Gemini Live with local permission validation."""
+        function_calls = tool_call.get("functionCalls", [])
+        for fc in function_calls:
+            name = fc.get("name")
+            args = fc.get("args", {})
+            if name in ("windows_app_control", "application_control"):
+                action = args.get("action", "launch")
+                app_name = args.get("app_name", "")
+                if self.controller and hasattr(self.controller, "windows_control"):
+                    op_type = f"{action}_app" if not action.endswith("_app") else action
+                    plan = ActionPlan(
+                        objective=f"{action.title()} {app_name}",
+                        target=app_name,
+                        operation_type=op_type,
+                        command=app_name,
+                        source="gemini_live",
+                    )
+                    if self._async_loop and self._async_loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            self._execute_tool_plan(plan),
+                            self._async_loop,
+                        )
+                    else:
+                        self._executor.submit(
+                            lambda: asyncio.run(self._execute_tool_plan(plan))
+                        )
+            elif name in ("file_search", "search_files", "semantic_search"):
+                query = args.get("query", "")
+                mode = args.get("mode", "hybrid")
+                if self.controller and hasattr(self.controller, "windows_control"):
+                    plan = ActionPlan(
+                        objective=f"Search for files matching '{query}'",
+                        target=query,
+                        operation_type="file_search",
+                        command=query,
+                        args=[mode],
+                        source="gemini_live",
+                    )
+                    if self._async_loop and self._async_loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            self._execute_tool_plan(plan),
+                            self._async_loop,
+                        )
+                    else:
+                        self._executor.submit(
+                            lambda: asyncio.run(self._execute_tool_plan(plan))
+                        )
+            elif name in ("storage_analysis", "disk_usage", "find_duplicates"):
+                target_p = args.get("path", "")
+                if self.controller and hasattr(self.controller, "windows_control"):
+                    plan = ActionPlan(
+                        objective=f"Analyze {name.replace('_', ' ')}",
+                        target=target_p,
+                        operation_type=name,
+                        command=target_p,
+                        source="gemini_live",
+                    )
+                    if self._async_loop and self._async_loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            self._execute_tool_plan(plan),
+                            self._async_loop,
+                        )
+                    else:
+                        self._executor.submit(
+                            lambda: asyncio.run(self._execute_tool_plan(plan))
+                        )
+
+    async def _execute_tool_plan(self, plan: ActionPlan) -> None:
+        """Execute a tool plan and speak the response."""
+        try:
+            self._set_state(VoiceState.THINKING)
+            result = await self.controller.windows_control.execute_plan(plan)
+            response_text = result.stdout if result.exit_code == 0 else result.stderr
+            if response_text:
+                self._last_spoken_response = response_text
+                self._set_state(VoiceState.SPEAKING)
+                spoken = await self.tts.synthesize(
+                    response_text,
+                    speed=self.config.voice.speech_speed,
+                    volume=self.config.voice.speech_volume,
+                )
+                if spoken.audio_path:
+                    self.player.play_file(spoken.audio_path)
+                else:
+                    self._on_player_finished()
+        except Exception as exc:
+            logger.error("Error executing Gemini tool call: %s", exc)
+
     def _on_player_started(self) -> None:
         if self._state == VoiceState.SPEAKING:
             if self.controller and hasattr(self.controller, "events"):
@@ -471,11 +561,18 @@ class ContinuousVoiceEngine:
                 await self._execute_voice_command(command_type)
                 return
 
-            # 3. Check for Phase 7 Computer Control Operations
+            # 3. Check for Phase 7 & Phase 9.1 Computer & Application Control Operations
             if self.controller and hasattr(self.controller, "windows_control"):
                 try:
                     plan = self.controller.windows_control.interpreter.interpret(text, source="voice")
-                    if plan.operation_type in ("launch_app", "restart", "shutdown", "lock", "pip_install", "storage_analysis", "network_diagnostics"):
+                    app_control_ops = (
+                        "launch_app", "switch_app", "minimize_app", "maximize_app",
+                        "restore_app", "close_app", "app_control",
+                        "restart", "shutdown", "lock", "pip_install", "storage_analysis", "network_diagnostics",
+                        "file_search", "search_files", "semantic_search", "content_search", "find_duplicates",
+                        "recycle_bin", "copy_file", "move_file", "rename_file", "index_directory",
+                    )
+                    if plan.operation_type in app_control_ops:
                         self._set_state(VoiceState.THINKING)
                         logger.info("Executing voice-triggered computer control action: %s", plan.objective)
                         result = await self.controller.windows_control.execute_plan(plan)
@@ -483,9 +580,9 @@ class ContinuousVoiceEngine:
                         if result.status.value == "confirmation_required":
                             response_text = f"Action '{plan.objective}' requires confirmation: {plan.confirmation_message}"
                         elif result.exit_code == 0:
-                            response_text = f"Completed: {plan.objective}."
+                            response_text = result.stdout or f"Completed: {plan.objective}."
                         else:
-                            response_text = f"Action '{plan.objective}' failed: {result.stderr or result.error or 'Execution error'}"
+                            response_text = result.stderr or result.error or f"Action '{plan.objective}' failed: {result.stderr or result.error or 'Execution error'}"
 
                         self._last_spoken_response = response_text
                         self._set_state(VoiceState.SPEAKING)

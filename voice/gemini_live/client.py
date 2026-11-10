@@ -54,6 +54,7 @@ class GeminiLiveClient:
         self.on_server_interrupted: Optional[Callable[[], None]] = None
         self.on_turn_completed: Optional[Callable[[], None]] = None
         self.on_connection_state_changed: Optional[Callable[[bool], None]] = None
+        self.on_tool_call: Optional[Callable[[dict[str, Any]], None]] = None
 
         # Wire streamer
         self.audio_streamer.set_send_callback(self._on_streamer_audio_chunk)
@@ -171,6 +172,11 @@ class GeminiLiveClient:
                 self.pcm_player.mark_turn_complete()
                 if self.on_turn_completed:
                     self.on_turn_completed()
+
+            # 4. Tool call event (Function calling from Gemini Live)
+            tool_call = event_data.get("toolCall")
+            if tool_call and self.on_tool_call:
+                self.on_tool_call(tool_call)
 
         except Exception as exc:
             logger.error("Error processing Gemini Live server event: %s", exc)

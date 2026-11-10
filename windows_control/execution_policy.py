@@ -100,11 +100,11 @@ class ExecutionPolicy:
                 # Check HAKS database / system directory protection
                 for haks_path in self.protected_haks_paths:
                     if target_path == haks_path or haks_path in target_path.parents:
-                        if operation_type in ("delete", "format", "wipe"):
+                        if operation_type in ("delete", "format", "wipe", "recycle_bin", "recycle_file", "delete_file"):
                             return RiskLevel.BLOCKED
                 for sys_path in PROTECTED_SYSTEM_PATHS:
-                    if target_path == sys_path:
-                        if operation_type in ("delete", "format", "wipe"):
+                    if target_path == sys_path or sys_path in target_path.parents:
+                        if operation_type in ("delete", "format", "wipe", "recycle_bin", "recycle_file", "delete_file"):
                             return RiskLevel.BLOCKED
             except Exception:
                 pass
@@ -122,7 +122,16 @@ class ExecutionPolicy:
             if pattern.search(clean_cmd):
                 return RiskLevel.SENSITIVE
 
-        if operation_type in ("software_install", "software_uninstall", "service_control", "system_config", "registry_edit"):
+        if operation_type in (
+            "software_install",
+            "software_uninstall",
+            "service_control",
+            "system_config",
+            "registry_edit",
+            "recycle_bin",
+            "recycle_file",
+            "delete_file",
+        ):
             return RiskLevel.SENSITIVE
 
         return RiskLevel.LOW

@@ -10,6 +10,8 @@ from pathlib import Path
 import re
 from typing import Optional
 
+from windows_control.application_intents import ApplicationIntentParser, AppActionType
+from windows_control.application_registry import ApplicationRegistry
 from windows_control.execution_policy import ExecutionPolicy
 from windows_control.models import (
     ActionPlan,
@@ -57,8 +59,14 @@ APP_ALIAS_MAP = {
 class CommandInterpreter:
     """Translates user natural-language queries into validated ActionPlans."""
 
-    def __init__(self, policy: Optional[ExecutionPolicy] = None) -> None:
+    def __init__(
+        self,
+        policy: Optional[ExecutionPolicy] = None,
+        registry: Optional[ApplicationRegistry] = None,
+    ) -> None:
         self.policy = policy or ExecutionPolicy()
+        self.registry = registry or ApplicationRegistry()
+        self.app_intent_parser = ApplicationIntentParser(self.registry)
 
     def interpret(self, user_instruction: str, source: str = "chat", working_dir: Optional[str] = None) -> ActionPlan:
         """Parse natural-language request into an executable ActionPlan."""
@@ -132,7 +140,31 @@ class CommandInterpreter:
                 source=source,
             )
 
-        # 2. Application Launching (English + Tamil)
+        # 2. Application Control Actions (Launch, Switch, Minimize, Maximize, Restore, Close) - English, Tamil, Tanglish
+        app_intent = self.app_intent_parser.parse(text)
+        if app_intent.is_actionable and app_intent.app:
+            action_verb_map = {
+                AppActionType.LAUNCH: "Open",
+                AppActionType.SWITCH: "Switch to",
+                AppActionType.MINIMIZE: "Minimize",
+                AppActionType.MAXIMIZE: "Maximize",
+                AppActionType.RESTORE: "Restore",
+                AppActionType.CLOSE: "Close",
+            }
+            verb = action_verb_map.get(app_intent.action, "Control")
+            return ActionPlan(
+                objective=f"{verb} {app_intent.app.display_name}",
+                target=app_intent.app.app_id,
+                operation_type=app_intent.action.value,
+                command=app_intent.app.app_id,
+                working_dir=cwd,
+                privilege_level=PrivilegeLevel.NORMAL,
+                risk_level=RiskLevel.LOW,
+                expected_outcome=f"{verb}s {app_intent.app.display_name} on the Windows desktop.",
+                source=source,
+            )
+
+        # Fallback to legacy tamil app match if any edge dialect was missed
         tamil_app_match = re.search(r"([a-zA-Z0-9_\-\u0B80-\u0BFF]+)\s*(ஐ|ை)?\s*(திற|துவக்கு|இயக்கு)", text)
         if tamil_app_match:
             raw_target = tamil_app_match.group(1).strip()
@@ -146,27 +178,6 @@ class CommandInterpreter:
                 privilege_level=PrivilegeLevel.NORMAL,
                 risk_level=RiskLevel.LOW,
                 expected_outcome=f"Launches {target_app} on the desktop.",
-                source=source,
-            )
-
-        app_match = re.search(r"\b(open|launch|start|திற)\s+([a-zA-Z0-9_\-\s]+)", text, re.IGNORECASE)
-        if app_match and not any(k in lower for k in ("pip", "file", "folder", "dependency", "dependencies", "repo", "git")):
-            target_app = app_match.group(2).strip()
-            for noise in ("the", "a", "an", "please", "for me", "now", "app", "application"):
-                target_app = re.sub(rf"^\b{noise}\b|\b{noise}\b$", "", target_app, flags=re.IGNORECASE).strip()
-
-            canonical_target = APP_ALIAS_MAP.get(target_app.lower(), TAMIL_APP_MAP.get(target_app, target_app))
-            command_str = canonical_target
-            display_target = target_app
-            return ActionPlan(
-                objective=f"Open {display_target}",
-                target=display_target,
-                operation_type="launch_app",
-                command=command_str,
-                working_dir=cwd,
-                privilege_level=PrivilegeLevel.NORMAL,
-                risk_level=RiskLevel.LOW,
-                expected_outcome=f"Launches {display_target} on the desktop.",
                 source=source,
             )
 
@@ -219,13 +230,83 @@ class CommandInterpreter:
                 source=source,
             )
 
-        # 5. Storage & Storage Analysis
-        if any(w in lower for w in ("check storage", "storage consumption", "consuming the most storage", "disk usage", "large files", "சி ட்ரைவ் இடம்", "வட்டு இடம்", "இடம் எவ்வளவு")):
+        # 5. File Intelligence - Duplicate Detection (English, Tamil, Tanglish)
+        dup_match = re.search(
+            r"\b(find|check|scan|detect|identify)?\s*(duplicate|identical|doubles?)\s*(files?|documents?|docs?)?\b|"
+            r"\b(போலி|இரட்டை)\s*கோப்புக(ள்|ளை)\b|"
+            r"\bduplicate\s*(files?|docs?|folders?)?\s*(kandupidi|thedu|check|pannu)\b",
+            lower,
+        )
+        if dup_match:
+            return ActionPlan(
+                objective="Find Duplicate Files",
+                target=cwd,
+                operation_type="find_duplicates",
+                command=f"find_duplicates {cwd}",
+                working_dir=cwd,
+                privilege_level=PrivilegeLevel.NORMAL,
+                risk_level=RiskLevel.LOW,
+                expected_outcome="Detects duplicate files using size grouping, SHA-256, and BLAKE3 verification.",
+                source=source,
+            )
+
+        # 6. File Intelligence - Safe Recycle Bin Deletion (English, Tamil, Tanglish)
+        # Note: Never permanently deletes; always uses Windows Recycle Bin via send2trash
+        recycle_match = re.search(
+            r"\b(?:delete|remove|recycle|trash|move\s+to\s+recycle\s+bin)\s+(?:file\s+)?([^\s]+\.[a-zA-Z0-9]{1,10})\b|"
+            r"([^\s]+\.[a-zA-Z0-9]{1,10})\s*(?:கோப்பை|ஐ)?\s*(?:நீக்கு|அழி|குப்பைத்தொட்டிக்கு\s*அனுப்பு)\b|"
+            r"([^\s]+\.[a-zA-Z0-9]{1,10})\s*(?:file\s+)?(?:delete\s+pannu|trash\s+la\s+podu|recycle\s+pannu)\b",
+            text,
+            re.IGNORECASE,
+        )
+        if recycle_match:
+            target_f = recycle_match.group(1) or recycle_match.group(2) or recycle_match.group(3)
+            clean_target = target_f.strip().strip("'\"")
+            return ActionPlan(
+                objective=f"Move '{clean_target}' to Recycle Bin",
+                target=clean_target,
+                operation_type="recycle_bin",
+                command=f"recycle {clean_target}",
+                working_dir=cwd,
+                privilege_level=PrivilegeLevel.NORMAL,
+                risk_level=RiskLevel.SENSITIVE,
+                confirmation_required=True,
+                confirmation_message=f"Are you sure you want to move '{clean_target}' to the Windows Recycle Bin?",
+                expected_outcome=f"Safely sends '{clean_target}' to the Windows Recycle Bin without permanent deletion.",
+                source=source,
+            )
+
+        # 7. File Intelligence - Directory Indexing
+        index_match = re.search(
+            r"\b(index\s+(?:my\s+)?(?:files|documents|directory|folder)|reindex)\b|"
+            r"\b(கோப்பகத்தை\s+அட்டவணைப்படுத்து)\b|"
+            r"\b(?:files?|documents?)\s*(?:index\s+pannu|index\s+seiyyum)\b",
+            lower,
+        )
+        if index_match:
+            return ActionPlan(
+                objective="Index Directory for File Intelligence",
+                target=cwd,
+                operation_type="index_directory",
+                command=f"index_directory {cwd}",
+                working_dir=cwd,
+                privilege_level=PrivilegeLevel.NORMAL,
+                risk_level=RiskLevel.LOW,
+                expected_outcome="Incrementally extracts text, chunks, and builds BGE-M3 dense and sparse indexes.",
+                source=source,
+            )
+
+        # 8. Storage & Storage Analysis (English, Tamil, Tanglish)
+        if any(w in lower for w in (
+            "check storage", "storage consumption", "consuming the most storage",
+            "disk usage", "large files", "சி ட்ரைவ் இடம்", "வட்டு இடம்", "இடம் எவ்வளவு",
+            "storage evvalavu", "disk space check", "space analysis"
+        )):
             return ActionPlan(
                 objective="Analyze Storage Consumption",
                 target=cwd,
                 operation_type="storage_analysis",
-                command="Get-ChildItem -Recurse | Measure-Object -Property Length -Sum",
+                command=f"storage_analysis {cwd}",
                 working_dir=cwd,
                 privilege_level=PrivilegeLevel.NORMAL,
                 risk_level=RiskLevel.LOW,
@@ -233,22 +314,40 @@ class CommandInterpreter:
                 source=source,
             )
 
-        # 6. File Searching
-        search_match = re.search(r"\b(find|search|தேடு)\s+(for\s+)?(all\s+)?([a-zA-Z0-9_\-\*\.]+)\s*(files?|கோப்புகள்?)?\b", lower)
-        if search_match:
-            search_pattern = search_match.group(4)
-            ext = search_pattern.replace("*", "").replace(".", "") if "." in search_pattern or search_pattern in ("python", "text", "json", "pdf") else None
-            if search_pattern == "python":
-                ext = "py"
+        # 9. File Searching & Multilingual Semantic Retrieval (English, Tamil, Tanglish)
+        search_query_match = re.search(
+            r"\b(?:find|search|look\s+for|where\s+is|where\s+are)\s+(?:for\s+)?(?:all\s+)?(.+?)(?:\s+files?|\s+documents?|\s+docs?)?$",
+            text,
+            re.IGNORECASE,
+        )
+        tamil_search_match = re.search(
+            r"(.+?)\s*(?:கோப்பை|ஆவணத்தை|கோப்புகளை|ஆவணங்களை)?\s*(?:தேடு|கண்டுபிடி|காட்டு)$",
+            text,
+        )
+        tanglish_search_match = re.search(
+            r"(.+?)\s*(?:file|document|doc)?\s*(?:enga\s+irukku|engae\s+irukku|thedu|kandupidi|search\s+pannu)$",
+            text,
+            re.IGNORECASE,
+        )
+
+        if search_query_match or tamil_search_match or tanglish_search_match:
+            if search_query_match:
+                extracted_q = search_query_match.group(1).strip()
+            elif tamil_search_match:
+                extracted_q = tamil_search_match.group(1).strip()
+            else:
+                extracted_q = tanglish_search_match.group(1).strip()
+
+            clean_q = re.sub(r"\b(files?|documents?|docs?|all)\b", "", extracted_q, flags=re.IGNORECASE).strip() or extracted_q
             return ActionPlan(
-                objective=f"Search for {search_pattern} files",
-                target=search_pattern,
+                objective=f"Search for files matching '{clean_q}'",
+                target=clean_q,
                 operation_type="search_files",
-                command=f"dir /s /b *.{ext or '*'}",
+                command=clean_q,
                 working_dir=cwd,
                 privilege_level=PrivilegeLevel.NORMAL,
                 risk_level=RiskLevel.LOW,
-                expected_outcome=f"Scans directory and lists all matching files.",
+                expected_outcome=f"Performs hybrid retrieval (Dense + Sparse + BM25/FTS + Windows Search) for '{clean_q}'.",
                 source=source,
             )
 

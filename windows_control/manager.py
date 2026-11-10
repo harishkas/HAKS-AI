@@ -22,8 +22,13 @@ import time
 from typing import Any, Callable, Optional
 
 from config.settings import AppConfig, get_settings
+from file_intelligence.service import FileIntelligenceService
+from file_intelligence.models import SearchMode
 from storage.database import DatabaseManager, get_db_manager
+from windows_control.application_controller import ApplicationController, ApplicationActionResult
+from windows_control.application_intents import ApplicationIntentParser
 from windows_control.application_manager import ApplicationManager
+from windows_control.application_registry import ApplicationRegistry
 from windows_control.audit_logger import AuditLogger
 from windows_control.cmd_service import CMDService
 from windows_control.command_executor import CommandExecutor
@@ -34,6 +39,7 @@ from windows_control.execution_policy import ExecutionPolicy
 from windows_control.filesystem_service import FilesystemService
 from windows_control.gui_automation import GUIAutomationService
 from windows_control.hardware_profiler import SystemHardwareProfiler
+from windows_control.window_manager import WindowManager
 from windows_control.models import (
     ActionPlan,
     CommandResult,
@@ -83,8 +89,22 @@ class WindowsControlManager:
         self.software = SoftwareManager()
         self.system = SystemManager()
         self.gui = GUIAutomationService()
-        self.interpreter = CommandInterpreter(self.policy)
+
+        # Phase 9.1 Application Automation Subsystems
+        self.app_registry = ApplicationRegistry(self.config)
+        self.window_manager = WindowManager()
+        self.app_controller = ApplicationController(
+            registry=self.app_registry,
+            window_manager=self.window_manager,
+            policy=self.policy,
+            config=self.config,
+        )
+        self.app_intents = ApplicationIntentParser(registry=self.app_registry)
+        self.interpreter = CommandInterpreter(policy=self.policy, registry=self.app_registry)
         self.audit = AuditLogger(self.config, self.db)
+
+        # Phase 9.2 Industrial File Intelligence Subsystem
+        self.file_intelligence = FileIntelligenceService(config=self.config)
 
         # System-wide discovery and hardware-aware profiler
         self.hardware_profiler = SystemHardwareProfiler()
@@ -224,16 +244,197 @@ class WindowsControlManager:
         error_callback: Optional[Callable[[str], None]] = None,
     ) -> CommandResult:
         """Execute a typed ActionPlan, handle confirmations, and log to audit trail."""
-        # Check special operation types (e.g. app launch, storage analysis) before shell
-        if plan.operation_type == "launch_app":
-            success, msg = self.application.launch_application(plan.command, plan.args)
+        # Check special operation types (e.g. app control, storage analysis) before shell
+        if plan.operation_type in ("launch_app", "switch_app", "minimize_app", "maximize_app", "restore_app", "close_app", "app_control"):
+            action = plan.operation_type
+            app_target = plan.command or plan.target
+            if action == "launch_app":
+                res_obj = self.app_controller.launch_application(app_target, plan.args)
+            elif action == "switch_app":
+                res_obj = self.app_controller.switch_to_application(app_target)
+            elif action == "minimize_app":
+                res_obj = self.app_controller.minimize_application(app_target)
+            elif action == "maximize_app":
+                res_obj = self.app_controller.maximize_application(app_target)
+            elif action == "restore_app":
+                res_obj = self.app_controller.restore_application(app_target)
+            elif action == "close_app":
+                res_obj = self.app_controller.close_application(app_target)
+            else:
+                res_obj = self.app_controller.launch_application(app_target, plan.args)
+
             res = CommandResult(
                 action_id=plan.id,
-                command=plan.command,
+                command=f"{action} {app_target}",
+                exit_code=0 if res_obj.success else 1,
+                stdout=res_obj.message if res_obj.success else "",
+                stderr=res_obj.message if not res_obj.success else "",
+                status=ExecutionStatus.COMPLETED if res_obj.success else ExecutionStatus.FAILED,
+                pid=res_obj.pid,
+                metadata={"action": res_obj.action, "app_id": res_obj.app_id, "window_count": res_obj.window_count},
+            )
+            self._log_plan_result(plan, res, confirmation_status="auto_approved")
+            return res
+
+        # File Intelligence Operations (Phase 9.2)
+        if plan.operation_type in ("file_search", "search_files", "semantic_search", "content_search", "hybrid_search"):
+            search_query = plan.command or plan.target
+            mode = SearchMode.HYBRID
+            if plan.operation_type == "semantic_search":
+                mode = SearchMode.DENSE
+            elif plan.args and plan.args[0] in [m.value for m in SearchMode]:
+                mode = SearchMode(plan.args[0])
+
+            scope = plan.working_dir if (plan.working_dir and Path(plan.working_dir).exists()) else None
+            results = self.file_intelligence.search(
+                natural_query=search_query,
+                search_mode=mode,
+                top_k=10,
+                rerank=True,
+                directory_scope=scope,
+            )
+            if results:
+                summary_lines = [f"Found {len(results)} file(s) matching '{search_query}':"]
+                for i, r in enumerate(results[:5], 1):
+                    summary_lines.append(f"{i}. {r.file_name} ({r.file_path}) - Score: {r.score:.3f}")
+                stdout_str = "\n".join(summary_lines)
+            else:
+                stdout_str = f"No files found matching '{search_query}'."
+
+            res = CommandResult(
+                action_id=plan.id,
+                command=f"search {search_query}",
+                exit_code=0,
+                stdout=stdout_str,
+                status=ExecutionStatus.COMPLETED,
+                metadata={"results": [r.model_dump() for r in results]},
+            )
+            self._log_plan_result(plan, res, confirmation_status="auto_approved")
+            return res
+
+        if plan.operation_type == "find_duplicates":
+            target_dir = plan.target or plan.working_dir or os.getcwd()
+            groups, benchmarks = self.file_intelligence.find_duplicates(
+                root_dir=target_dir,
+                use_blake3_benchmark=True,
+            )
+            total_wasted = sum(g.wasted_bytes for g in groups)
+            wasted_mb = total_wasted / (1024 * 1024)
+            if groups:
+                lines = [f"Detected {len(groups)} duplicate group(s) with {wasted_mb:.2f} MB potential space savings:"]
+                for idx, g in enumerate(groups[:5], 1):
+                    lines.append(f"Group {idx} ({g.size_bytes / 1024:.1f} KB, hash: {g.hash_value[:10]}...):")
+                    for f in g.files:
+                        lines.append(f"  - {f}")
+                lines.append("Note: Duplicate files are never deleted automatically. Please specify files to move to Recycle Bin.")
+                stdout_str = "\n".join(lines)
+            else:
+                stdout_str = f"No duplicate files detected in {target_dir}."
+
+            res = CommandResult(
+                action_id=plan.id,
+                command=f"find_duplicates {target_dir}",
+                exit_code=0,
+                stdout=stdout_str,
+                status=ExecutionStatus.COMPLETED,
+                metadata={
+                    "duplicate_groups": [g.model_dump() for g in groups],
+                    "benchmark": benchmarks,
+                },
+            )
+            self._log_plan_result(plan, res, confirmation_status="auto_approved")
+            return res
+
+        if plan.operation_type in ("storage_analysis", "disk_usage"):
+            target_dir = plan.target or plan.working_dir or os.getcwd()
+            summary = self.file_intelligence.analyze_disk_usage(root_dir=target_dir)
+            lines = [
+                f"Storage Analysis for {summary.root_path}:",
+                f"- Total Size: {summary.total_size_mb:.2f} MB ({summary.total_files} files, {summary.total_directories} directories)",
+            ]
+            if summary.extension_counts:
+                ext_str = ", ".join(f"{k}: {v}" for k, v in list(summary.extension_counts.items())[:6])
+                lines.append(f"- File Types: {ext_str}")
+            if summary.largest_files:
+                lines.append("- Largest Files:")
+                for lf in summary.largest_files[:5]:
+                    lines.append(f"  * {lf.file_name} ({lf.size_mb:.2f} MB) - {lf.file_path}")
+            stdout_str = "\n".join(lines)
+
+            res = CommandResult(
+                action_id=plan.id,
+                command=f"storage_analysis {target_dir}",
+                exit_code=0,
+                stdout=stdout_str,
+                status=ExecutionStatus.COMPLETED,
+                metadata={"disk_usage": summary.model_dump()},
+            )
+            self._log_plan_result(plan, res, confirmation_status="auto_approved")
+            return res
+
+        if plan.operation_type in ("recycle_bin", "recycle_file", "delete_file"):
+            target_file = plan.target or plan.command
+            if plan.confirmation_required and not bypass_confirmation:
+                res = CommandResult(
+                    action_id=plan.id,
+                    command=f"recycle {target_file}",
+                    exit_code=1,
+                    status=ExecutionStatus.CONFIRMATION_REQUIRED,
+                    stderr=plan.confirmation_message or f"Confirmation required to recycle {target_file}",
+                )
+                self._log_plan_result(plan, res, confirmation_status="pending_confirmation")
+                return res
+
+            success, msg = self.file_intelligence.send_to_recycle_bin(target_file)
+            res = CommandResult(
+                action_id=plan.id,
+                command=f"recycle {target_file}",
                 exit_code=0 if success else 1,
                 stdout=msg if success else "",
-                stderr=msg if not success else "",
+                stderr="" if success else msg,
                 status=ExecutionStatus.COMPLETED if success else ExecutionStatus.FAILED,
+            )
+            self._log_plan_result(plan, res, confirmation_status="user_approved" if bypass_confirmation else "auto_approved")
+            return res
+
+        if plan.operation_type in ("copy_file", "move_file", "rename_file"):
+            target_file = plan.target
+            dest = plan.args[0] if plan.args else plan.command
+            if plan.operation_type == "copy_file":
+                success, msg = self.file_intelligence.copy_file(target_file, dest)
+            elif plan.operation_type == "move_file":
+                success, msg = self.file_intelligence.move_file(target_file, dest)
+            else:
+                success, msg = self.file_intelligence.rename_file(target_file, dest)
+
+            res = CommandResult(
+                action_id=plan.id,
+                command=f"{plan.operation_type} {target_file} -> {dest}",
+                exit_code=0 if success else 1,
+                stdout=msg if success else "",
+                stderr="" if success else msg,
+                status=ExecutionStatus.COMPLETED if success else ExecutionStatus.FAILED,
+            )
+            self._log_plan_result(plan, res, confirmation_status="auto_approved")
+            return res
+
+        if plan.operation_type == "index_directory":
+            target_dir = plan.target or plan.working_dir or os.getcwd()
+            stats = self.file_intelligence.index_directory(target_dir)
+            stdout_str = (
+                f"Directory indexing complete for {target_dir}:\n"
+                f"- Total files scanned: {stats.get('total_files', 0)}\n"
+                f"- Files indexed: {stats.get('indexed_files', 0)}\n"
+                f"- Chunks indexed: {stats.get('indexed_chunks', 0)}\n"
+                f"- Files skipped: {stats.get('skipped_files', 0)}"
+            )
+            res = CommandResult(
+                action_id=plan.id,
+                command=f"index_directory {target_dir}",
+                exit_code=0,
+                stdout=stdout_str,
+                status=ExecutionStatus.COMPLETED,
+                metadata={"index_stats": stats},
             )
             self._log_plan_result(plan, res, confirmation_status="auto_approved")
             return res
