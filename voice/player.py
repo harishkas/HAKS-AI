@@ -24,8 +24,13 @@ logger = logging.getLogger("haks.voice.player")
 class AudioPlayerService:
     """Streams audio playback with volume scaling and instant thread-safe interruption."""
 
-    def __init__(self, output_device_index: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        output_device_index: Optional[int] = None,
+        echo_suppressor: Optional[object] = None,
+    ) -> None:
         self.output_device_index = output_device_index
+        self.echo_suppressor = echo_suppressor
         self._is_playing: bool = False
         self._stop_event = threading.Event()
         self._playback_thread: Optional[threading.Thread] = None
@@ -152,6 +157,9 @@ class AudioPlayerService:
                             break
                         chunk_end = min(idx + block_size, total_samples)
                         chunk = audio_floats[idx:chunk_end]
+                        if self.echo_suppressor is not None and hasattr(self.echo_suppressor, "feed_playback_chunk"):
+                            chunk_b = (np.clip(chunk, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+                            self.echo_suppressor.feed_playback_chunk(chunk_b, sample_rate)
                         stream.write(chunk)
                         idx = chunk_end
 

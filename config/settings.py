@@ -155,6 +155,15 @@ class AIConfig(BaseModel):
 class VoiceConfig(BaseModel):
     """Voice pipeline configuration."""
 
+    voice_mode: Literal["gemini_live", "pipeline", "offline"] = Field(
+        default_factory=lambda: os.getenv("HAKS_VOICE_MODE", "gemini_live")
+    )
+    gemini_live_model: str = Field(
+        default_factory=lambda: os.getenv("HAKS_GEMINI_LIVE_MODEL", "gemini-3.8-live")
+    )
+    gemini_live_voice: str = Field(
+        default_factory=lambda: os.getenv("HAKS_GEMINI_LIVE_VOICE", "Aoede")
+    )
     wake_phrase: str = "Hey HAKS"
     wake_word_engine: Literal["local", "porcupine"] = "local"
     porcupine_access_key: str = Field(default_factory=lambda: os.getenv("HAKS_PORCUPINE_ACCESS_KEY", ""))
@@ -169,7 +178,22 @@ class VoiceConfig(BaseModel):
     input_device_index: Optional[int] = None
     output_device_index: Optional[int] = None
     vad_threshold: float = 0.5
-    silence_timeout_ms: int = 1200
+    vad_sensitivity: int = Field(default_factory=lambda: int(os.getenv("HAKS_VAD_SENSITIVITY", "2")))
+    human_speech_sensitivity: float = Field(default_factory=lambda: float(os.getenv("HAKS_SPEECH_SENSITIVITY", "0.65")))
+    min_speech_duration_ms: int = Field(default_factory=lambda: int(os.getenv("HAKS_MIN_SPEECH_DURATION_MS", "160")))
+    silence_timeout_ms: int = Field(default_factory=lambda: int(os.getenv("HAKS_SILENCE_TIMEOUT_MS", "500")))
+    interruption_sensitivity: float = Field(default_factory=lambda: float(os.getenv("HAKS_INTERRUPTION_SENSITIVITY", "0.7")))
+    voice_interruption_sensitivity: float = Field(default_factory=lambda: float(os.getenv("HAKS_VOICE_INTERRUPTION_SENSITIVITY", "0.7")))
+    enable_echo_cancellation: bool = Field(default_factory=lambda: os.getenv("HAKS_ENABLE_ECHO_CANCELLATION", "true").lower() == "true")
+    enable_noise_suppression: bool = Field(default_factory=lambda: os.getenv("HAKS_ENABLE_NOISE_SUPPRESSION", "true").lower() == "true")
+    noise_suppression_strength: Literal["low", "medium", "high", "ultra"] = Field(
+        default_factory=lambda: os.getenv("HAKS_NOISE_SUPPRESSION_STRENGTH", "medium")
+    )
+    mic_input_gain: float = Field(default_factory=lambda: float(os.getenv("HAKS_MIC_INPUT_GAIN", "1.0")))
+    auto_noise_calibration: bool = Field(default_factory=lambda: os.getenv("HAKS_AUTO_NOISE_CALIBRATION", "true").lower() == "true")
+    notch_electrical_hum: bool = Field(default_factory=lambda: os.getenv("HAKS_NOTCH_ELECTRICAL_HUM", "true").lower() == "true")
+    highpass_rumble: bool = Field(default_factory=lambda: os.getenv("HAKS_HIGHPASS_RUMBLE", "true").lower() == "true")
+    pre_roll_ms: int = Field(default_factory=lambda: int(os.getenv("HAKS_PRE_ROLL_MS", "240")))
     conversation_timeout_seconds: int = 45
     whisper_model_size: Literal["tiny", "base", "small"] = "base"
     tts_engine: Literal["edge", "sapi", "piper", "auto"] = "auto"

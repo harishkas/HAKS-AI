@@ -99,7 +99,7 @@ class VoiceView(QWidget):
         # Live VU Meter (Mic Audio Activity)
         vu_box = QHBoxLayout()
         lbl_vu = QLabel("Mic Level:")
-        lbl_vu.setStyleSheet("color: #4b5563; font-size: 11px;")
+        lbl_vu.setStyleSheet("color: #4b5563; font-size: 11px; width: 110px;")
         self.vu_meter = QProgressBar()
         self.vu_meter.setRange(0, 100)
         self.vu_meter.setValue(0)
@@ -121,6 +121,46 @@ class VoiceView(QWidget):
         vu_box.addWidget(lbl_vu)
         vu_box.addWidget(self.vu_meter, stretch=1)
         sc_layout.addLayout(vu_box)
+
+        # Live Speech Confidence Indicator
+        conf_box = QHBoxLayout()
+        lbl_conf = QLabel("Speech Confidence:")
+        lbl_conf.setStyleSheet("color: #4b5563; font-size: 11px; width: 110px;")
+        self.conf_meter = QProgressBar()
+        self.conf_meter.setRange(0, 100)
+        self.conf_meter.setValue(0)
+        self.conf_meter.setFixedHeight(8)
+        self.conf_meter.setTextVisible(False)
+        self.conf_meter.setStyleSheet(
+            """
+            QProgressBar {
+                background-color: #f3f4f6;
+                border-radius: 4px;
+                border: 1px solid #d1d5db;
+            }
+            QProgressBar::chunk {
+                background-color: #0284c7;
+                border-radius: 4px;
+            }
+            """
+        )
+        self.lbl_conf_badge = QLabel("0% (Silence)")
+        self.lbl_conf_badge.setStyleSheet("color: #0369a1; font-size: 11px; font-weight: 600; min-width: 90px;")
+        conf_box.addWidget(lbl_conf)
+        conf_box.addWidget(self.conf_meter, stretch=1)
+        conf_box.addWidget(self.lbl_conf_badge)
+        sc_layout.addLayout(conf_box)
+
+        # Mic Test Quick Action
+        test_row = QHBoxLayout()
+        self.btn_test_mic = QPushButton("🎙️ Test Microphone & Confidence")
+        self.btn_test_mic.setProperty("class", "btn_secondary")
+        self.btn_test_mic.setFixedHeight(28)
+        self.btn_test_mic.clicked.connect(self._toggle_mic_test)
+        test_row.addStretch()
+        test_row.addWidget(self.btn_test_mic)
+        test_row.addStretch()
+        sc_layout.addLayout(test_row)
 
         layout.addWidget(self.state_card)
 
@@ -181,6 +221,59 @@ class VoiceView(QWidget):
         cmd_grid.addWidget(self.btn_standby, 1, 2)
 
         layout.addLayout(cmd_grid)
+
+        # 4b. Voice Mode & Gemini Live Architecture Card
+        mode_card = QFrame()
+        mode_card.setProperty("class", "stat_card")
+        mc_layout = QVBoxLayout(mode_card)
+        mc_layout.setSpacing(10)
+
+        mc_title = QLabel("VOICE AI ARCHITECTURE & GEMINI LIVE")
+        mc_title.setProperty("class", "card_title")
+        mc_layout.addWidget(mc_title)
+
+        # Mode selector row
+        mode_row = QHBoxLayout()
+        lbl_vmode = QLabel("Voice Engine Mode:")
+        lbl_vmode.setStyleSheet("color: #4b5563; font-size: 12px; width: 140px;")
+        self.combo_voice_mode = QComboBox()
+        self.combo_voice_mode.setMinimumWidth(320)
+        self.combo_voice_mode.addItem("Google Gemini Live (Real-Time Bidirectional Speech-to-Speech)", "gemini_live")
+        self.combo_voice_mode.addItem("Pipeline Mode (Faster-Whisper STT + Gemini Text + Edge TTS)", "pipeline")
+        self.combo_voice_mode.addItem("Offline Mode (Faster-Whisper + Ollama Local + SAPI/Piper)", "offline")
+        self.combo_voice_mode.currentIndexChanged.connect(self._on_voice_mode_changed)
+        mode_row.addWidget(lbl_vmode)
+        mode_row.addWidget(self.combo_voice_mode)
+        mode_row.addStretch()
+        mc_layout.addLayout(mode_row)
+
+        # Gemini Live Voice selector
+        live_voice_row = QHBoxLayout()
+        lbl_lvoice = QLabel("Gemini Live Voice:")
+        lbl_lvoice.setStyleSheet("color: #4b5563; font-size: 12px; width: 140px;")
+        self.combo_live_voice = QComboBox()
+        for v in ["Aoede (Default, Warm & Expressive)", "Puck (Energetic)", "Charon (Calm)", "Kore (Bright)", "Fenrir (Authoritative)"]:
+            raw_v = v.split()[0]
+            self.combo_live_voice.addItem(v, raw_v)
+        self.combo_live_voice.currentIndexChanged.connect(self._on_live_voice_changed)
+        live_voice_row.addWidget(lbl_lvoice)
+        live_voice_row.addWidget(self.combo_live_voice)
+        live_voice_row.addStretch()
+        mc_layout.addLayout(live_voice_row)
+
+        # Live Status & Latency indicator
+        status_row = QHBoxLayout()
+        self.lbl_live_status = QLabel("Gemini Live Status: Disconnected")
+        self.lbl_live_status.setStyleSheet("color: #0366d6; font-size: 12px; font-weight: 600;")
+        self.lbl_live_latency = QLabel("Latency: -- ms")
+        self.lbl_live_latency.setStyleSheet("color: #4b5563; font-size: 12px;")
+        status_row.addWidget(self.lbl_live_status)
+        status_row.addSpacing(20)
+        status_row.addWidget(self.lbl_live_latency)
+        status_row.addStretch()
+        mc_layout.addLayout(status_row)
+
+        layout.addWidget(mode_card)
 
         # 5. Audio Hardware & Wake Word Configuration Card
         hw_card = QFrame()
@@ -299,6 +392,46 @@ class VoiceView(QWidget):
         speed_row.addWidget(self.lbl_speed_val)
         sp_layout.addLayout(speed_row)
 
+        # VAD Sensitivity Dropdown
+        vad_row = QHBoxLayout()
+        lbl_vadsens = QLabel("VAD Noise Rejection:")
+        lbl_vadsens.setStyleSheet("color: #4b5563; font-size: 12px; width: 140px;")
+        self.combo_vad_sens = QComboBox()
+        self.combo_vad_sens.addItem("Mode 2 (Balanced Speech Detection - Recommended)", 2)
+        self.combo_vad_sens.addItem("Mode 3 (Very Aggressive - High Ambient Noise)", 3)
+        self.combo_vad_sens.addItem("Mode 1 (Moderate Sensitivity)", 1)
+        self.combo_vad_sens.addItem("Mode 0 (Relaxed - Quiet Environment)", 0)
+        self.combo_vad_sens.currentIndexChanged.connect(self._on_vad_sensitivity_changed)
+        vad_row.addWidget(lbl_vadsens)
+        vad_row.addWidget(self.combo_vad_sens)
+        vad_row.addStretch()
+        sp_layout.addLayout(vad_row)
+
+        # End of Speech Silence Timeout Slider
+        silence_row = QHBoxLayout()
+        lbl_silence = QLabel("End-of-Speech Silence:")
+        lbl_silence.setStyleSheet("color: #4b5563; font-size: 12px; width: 140px;")
+        self.slider_silence = QSlider(Qt.Orientation.Horizontal)
+        self.slider_silence.setRange(300, 1200)
+        self.slider_silence.setValue(self.controller.config.voice.silence_timeout_ms)
+        self.lbl_silence_val = QLabel(f"{self.controller.config.voice.silence_timeout_ms} ms")
+        self.slider_silence.valueChanged.connect(self._on_silence_timeout_changed)
+        silence_row.addWidget(lbl_silence)
+        silence_row.addWidget(self.slider_silence, stretch=1)
+        silence_row.addWidget(self.lbl_silence_val)
+        sp_layout.addLayout(silence_row)
+
+        # Echo cancellation and noise suppression
+        self.chk_echo_cancel = QCheckBox("Enable Acoustic Echo Cancellation (prevent speaker feedback false barge-in)")
+        self.chk_echo_cancel.setChecked(self.controller.config.voice.enable_echo_cancellation)
+        self.chk_echo_cancel.toggled.connect(self._on_echo_cancel_toggled)
+        sp_layout.addWidget(self.chk_echo_cancel)
+
+        self.chk_noise_suppress = QCheckBox("Enable Multi-Band Spectral Noise Suppression (fans, clicks, hum)")
+        self.chk_noise_suppress.setChecked(self.controller.config.voice.enable_noise_suppression)
+        self.chk_noise_suppress.toggled.connect(self._on_noise_suppress_toggled)
+        sp_layout.addWidget(self.chk_noise_suppress)
+
         # Continuous mode & barge-in checkboxes
         self.chk_continuous = QCheckBox("Enable Continuous Conversation (multi-turn voice without re-waking)")
         self.chk_continuous.setChecked(self.controller.config.voice.continuous_mode)
@@ -312,6 +445,104 @@ class VoiceView(QWidget):
 
         layout.addWidget(speech_card)
 
+        # 7. Human Voice Isolation & Noise Cancellation Card
+        dsp_card = QFrame()
+        dsp_card.setProperty("class", "stat_card")
+        dsp_layout = QVBoxLayout(dsp_card)
+        dsp_layout.setSpacing(10)
+
+        dsp_title = QLabel("HUMAN VOICE ISOLATION & NOISE CANCELLATION")
+        dsp_title.setProperty("class", "card_title")
+        dsp_layout.addWidget(dsp_title)
+
+        # Master Toggles Row
+        toggles_row = QHBoxLayout()
+        self.chk_noise_suppression = QCheckBox("Real-time Background Noise Suppression")
+        self.chk_noise_suppression.setChecked(self.controller.config.voice.enable_noise_suppression)
+        self.chk_noise_suppression.toggled.connect(self._on_noise_suppression_toggled)
+
+        self.chk_aec = QCheckBox("Acoustic Echo Cancellation (AEC)")
+        self.chk_aec.setChecked(self.controller.config.voice.enable_echo_cancellation)
+        self.chk_aec.toggled.connect(self._on_aec_toggled)
+
+        toggles_row.addWidget(self.chk_noise_suppression)
+        toggles_row.addSpacing(20)
+        toggles_row.addWidget(self.chk_aec)
+        toggles_row.addStretch()
+        dsp_layout.addLayout(toggles_row)
+
+        # Noise Suppression Strength row
+        strength_row = QHBoxLayout()
+        lbl_strength = QLabel("Noise Suppression Strength:")
+        lbl_strength.setStyleSheet("color: #4b5563; font-size: 12px; width: 180px;")
+        self.combo_ns_strength = QComboBox()
+        self.combo_ns_strength.addItem("Low (6-10 dB, preserves room warmth)", "low")
+        self.combo_ns_strength.addItem("Medium (12-18 dB, recommended for fan/AC)", "medium")
+        self.combo_ns_strength.addItem("High (18-24 dB, loud traffic & mechanical noise)", "high")
+        self.combo_ns_strength.addItem("Ultra (24+ dB, aggressive suppression)", "ultra")
+        self.combo_ns_strength.currentIndexChanged.connect(self._on_ns_strength_changed)
+        strength_row.addWidget(lbl_strength)
+        strength_row.addWidget(self.combo_ns_strength)
+        strength_row.addStretch()
+        dsp_layout.addLayout(strength_row)
+
+        # Human Speech Detection Sensitivity slider
+        speech_sens_row = QHBoxLayout()
+        lbl_ssens = QLabel("Speech Detection Sensitivity:")
+        lbl_ssens.setStyleSheet("color: #4b5563; font-size: 12px; width: 180px;")
+        self.slider_speech_sens = QSlider(Qt.Orientation.Horizontal)
+        self.slider_speech_sens.setRange(10, 100)
+        self.slider_speech_sens.setValue(int(self.controller.config.voice.human_speech_sensitivity * 100))
+        self.lbl_speech_sens_val = QLabel(f"{self.controller.config.voice.human_speech_sensitivity:.2f}")
+        self.slider_speech_sens.valueChanged.connect(self._on_speech_sens_changed)
+        speech_sens_row.addWidget(lbl_ssens)
+        speech_sens_row.addWidget(self.slider_speech_sens, stretch=1)
+        speech_sens_row.addWidget(self.lbl_speech_sens_val)
+        dsp_layout.addLayout(speech_sens_row)
+
+        # Microphone Input Gain slider
+        gain_row = QHBoxLayout()
+        lbl_gain = QLabel("Microphone Input Gain:")
+        lbl_gain.setStyleSheet("color: #4b5563; font-size: 12px; width: 180px;")
+        self.slider_mic_gain = QSlider(Qt.Orientation.Horizontal)
+        self.slider_mic_gain.setRange(20, 300)
+        self.slider_mic_gain.setValue(int(self.controller.config.voice.mic_input_gain * 100))
+        self.lbl_mic_gain_val = QLabel(f"{self.controller.config.voice.mic_input_gain:.2f}x")
+        self.slider_mic_gain.valueChanged.connect(self._on_mic_gain_changed)
+        gain_row.addWidget(lbl_gain)
+        gain_row.addWidget(self.slider_mic_gain, stretch=1)
+        gain_row.addWidget(self.lbl_mic_gain_val)
+        dsp_layout.addLayout(gain_row)
+
+        # Voice Interruption (Barge-in) Sensitivity slider
+        int_sens_row = QHBoxLayout()
+        lbl_isens = QLabel("Interruption Sensitivity:")
+        lbl_isens.setStyleSheet("color: #4b5563; font-size: 12px; width: 180px;")
+        self.slider_interruption_sens = QSlider(Qt.Orientation.Horizontal)
+        self.slider_interruption_sens.setRange(10, 100)
+        self.slider_interruption_sens.setValue(int(self.controller.config.voice.voice_interruption_sensitivity * 100))
+        self.lbl_interruption_sens_val = QLabel(f"{self.controller.config.voice.voice_interruption_sensitivity:.2f}")
+        self.slider_interruption_sens.valueChanged.connect(self._on_interruption_sens_changed)
+        int_sens_row.addWidget(lbl_isens)
+        int_sens_row.addWidget(self.slider_interruption_sens, stretch=1)
+        int_sens_row.addWidget(self.lbl_interruption_sens_val)
+        dsp_layout.addLayout(int_sens_row)
+
+        # Noise-floor Calibration Row
+        cal_row = QHBoxLayout()
+        self.btn_calibrate = QPushButton("🎯 Calibrate Room Noise Floor")
+        self.btn_calibrate.setProperty("class", "btn_secondary")
+        self.btn_calibrate.clicked.connect(self._on_calibrate_clicked)
+        self.lbl_cal_status = QLabel("Room noise floor: calibrated baseline ready")
+        self.lbl_cal_status.setStyleSheet("color: #4b5563; font-size: 11px;")
+        cal_row.addWidget(self.btn_calibrate)
+        cal_row.addSpacing(16)
+        cal_row.addWidget(self.lbl_cal_status)
+        cal_row.addStretch()
+        dsp_layout.addLayout(cal_row)
+
+        layout.addWidget(dsp_card)
+
         # Set scroll widget layout
         self.scroll.setWidget(self.container)
         main_layout = QVBoxLayout(self)
@@ -324,6 +555,14 @@ class VoiceView(QWidget):
         self.controller.events.voice_audio_level_updated.connect(self._update_vu_meter)
         self.controller.events.voice_transcript_received.connect(self._update_user_transcript)
         self.controller.events.voice_speaking_started.connect(self._update_spoken_response)
+        if hasattr(self.controller.events, "voice_live_status_changed"):
+            self.controller.events.voice_live_status_changed.connect(self._update_live_status)
+        if hasattr(self.controller.events, "voice_live_latency_updated"):
+            self.controller.events.voice_live_latency_updated.connect(self._update_live_latency)
+        if hasattr(self.controller.events, "voice_speech_confidence_updated"):
+            self.controller.events.voice_speech_confidence_updated.connect(self._update_confidence_meter)
+        if hasattr(self.controller.events, "voice_noise_floor_updated"):
+            self.controller.events.voice_noise_floor_updated.connect(self._update_noise_floor_display)
 
     def _load_initial_values(self) -> None:
         """Populate device lists and configuration controls."""
@@ -352,6 +591,20 @@ class VoiceView(QWidget):
         for i in range(self.lang_combo.count()):
             if self.lang_combo.itemData(i) == pref_lang:
                 self.lang_combo.setCurrentIndex(i)
+                break
+
+        # Select active voice mode
+        cur_vmode = self.controller.get_voice_mode()
+        for i in range(self.combo_voice_mode.count()):
+            if self.combo_voice_mode.itemData(i) == cur_vmode:
+                self.combo_voice_mode.setCurrentIndex(i)
+                break
+
+        # Select live voice
+        cur_lvoice = self.controller.config.voice.gemini_live_voice
+        for i in range(self.combo_live_voice.count()):
+            if self.combo_live_voice.itemData(i) == cur_lvoice:
+                self.combo_live_voice.setCurrentIndex(i)
                 break
 
     # --------------------------------------------------------------------------
@@ -437,11 +690,87 @@ class VoiceView(QWidget):
         self.lbl_speed_val.setText(f"{speed:.2f}x")
         self.controller.config.voice.speech_speed = speed
 
+    def _on_voice_mode_changed(self, idx: int) -> None:
+        mode = self.combo_voice_mode.itemData(idx)
+        self.controller.set_voice_mode(mode)
+
+    def _on_live_voice_changed(self, idx: int) -> None:
+        v = self.combo_live_voice.itemData(idx)
+        self.controller.config.voice.gemini_live_voice = v
+        self.controller.set_setting("gemini_live_voice", v, section="voice")
+
     def _on_continuous_toggled(self, checked: bool) -> None:
         self.controller.config.voice.continuous_mode = checked
 
     def _on_barge_in_toggled(self, checked: bool) -> None:
         self.controller.config.voice.enable_barge_in = checked
+
+    def _on_noise_suppression_toggled(self, checked: bool) -> None:
+        self.controller.set_noise_suppression_enabled(checked)
+
+    def _on_aec_toggled(self, checked: bool) -> None:
+        self.controller.set_echo_cancellation_enabled(checked)
+
+    def _on_ns_strength_changed(self, idx: int) -> None:
+        val = self.combo_ns_strength.itemData(idx)
+        if val:
+            self.controller.set_noise_suppression_strength(val)
+
+    def _on_speech_sens_changed(self, val: int) -> None:
+        sens = val / 100.0
+        self.lbl_speech_sens_val.setText(f"{sens:.2f}")
+        self.controller.set_human_speech_sensitivity(sens)
+
+    def _on_mic_gain_changed(self, val: int) -> None:
+        gain = val / 100.0
+        self.lbl_mic_gain_val.setText(f"{gain:.2f}x")
+        self.controller.set_mic_gain(gain)
+
+    def _on_interruption_sens_changed(self, val: int) -> None:
+        sens = val / 100.0
+        self.lbl_interruption_sens_val.setText(f"{sens:.2f}")
+        self.controller.set_voice_interruption_sensitivity(sens)
+
+    def _on_calibrate_clicked(self) -> None:
+        self.lbl_cal_status.setText("Calibrating ambient room noise... (keep quiet for 1s)")
+        self.btn_calibrate.setEnabled(False)
+        self.controller.calibrate_noise_floor()
+
+        # Timer to complete calibration after 1.2s
+        QTimer.singleShot(1200, self._finish_calibration_ui)
+
+    def _finish_calibration_ui(self) -> None:
+        floor = self.controller.finish_noise_calibration()
+        self.lbl_cal_status.setText(f"Calibrated noise floor baseline: {floor:.5f}")
+        self.btn_calibrate.setEnabled(True)
+
+    def _toggle_mic_test(self) -> None:
+        """Toggle microphone capture for live confidence & audio testing."""
+        state = self.controller.get_voice_state()
+        if state == "STOPPED":
+            success = self.controller.start_voice_assistant()
+            if success:
+                self.btn_test_mic.setText("⏹ Stop Mic Test")
+                self.btn_test_mic.setStyleSheet("color: #dc2626;")
+        else:
+            self.btn_test_mic.setText("🎙️ Test Microphone & Confidence")
+            self.btn_test_mic.setStyleSheet("")
+
+    def _update_confidence_meter(self, confidence: float) -> None:
+        val = int(min(100, max(0, confidence * 100)))
+        self.conf_meter.setValue(val)
+        if val >= 55:
+            self.lbl_conf_badge.setText(f"{val}% (Speech Detected)")
+            self.lbl_conf_badge.setStyleSheet("color: #15803d; font-size: 11px; font-weight: 700; min-width: 90px;")
+        elif val >= 25:
+            self.lbl_conf_badge.setText(f"{val}% (Uncertain)")
+            self.lbl_conf_badge.setStyleSheet("color: #d97706; font-size: 11px; font-weight: 600; min-width: 90px;")
+        else:
+            self.lbl_conf_badge.setText(f"{val}% (Silence/Noise)")
+            self.lbl_conf_badge.setStyleSheet("color: #6b7280; font-size: 11px; font-weight: 500; min-width: 90px;")
+
+    def _update_noise_floor_display(self, floor: float) -> None:
+        self.lbl_cal_status.setText(f"Calibrated noise floor: {floor:.5f}")
 
     # --------------------------------------------------------------------------
     # Signal Event Handlers
@@ -465,6 +794,14 @@ class VoiceView(QWidget):
 
     def _update_spoken_response(self, text: str) -> None:
         self.lbl_spoken_response.setText(f"<b>HAKS:</b> 🔊 {text}")
+
+    def _update_live_status(self, status: str) -> None:
+        color = "#15803d" if status in ("CONNECTED", "STREAMING") else ("#d97706" if status == "CONNECTING" else "#6b7280")
+        self.lbl_live_status.setText(f"Gemini Live Status: {status}")
+        self.lbl_live_status.setStyleSheet(f"color: {color}; font-size: 12px; font-weight: 600;")
+
+    def _update_live_latency(self, latency_ms: float) -> None:
+        self.lbl_live_latency.setText(f"Latency: {latency_ms:.0f} ms")
 
     def _update_ui_state(self, state: str) -> None:
         self.lbl_state_display.setText(state)

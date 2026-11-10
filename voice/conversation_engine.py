@@ -33,6 +33,13 @@ from voice.models import (
     VoiceState,
 )
 from voice.player import AudioPlayerService
+from voice.echo_cancellation import AcousticEchoSuppressor
+from voice.gemini_live import (
+    AudioStreamerBridge,
+    GeminiLiveClient,
+    LiveConnectionStatus,
+    PCMStreamPlayer,
+)
 from voice.stt.faster_whisper_stt import FasterWhisperSTT
 from voice.tts.router import LanguageAwareTTSRouter
 from voice.vad import VoiceActivityDetector
@@ -102,11 +109,17 @@ class ContinuousVoiceEngine:
         self.config = config or get_settings()
         self.controller = controller
 
-        # Core subsystems
+        # Audio Capture & Unified DSP Pipeline (DC norm, Rumble HPF, Hum notch, AEC, NS, Enhancer, VAD)
         self.audio_capture = AudioCaptureService(self.config)
+        self.echo_suppressor = self.audio_capture.pipeline.echo_canceller
+
         self.vad = VoiceActivityDetector(
             sample_rate=self.config.voice.input_sample_rate,
             silence_timeout_ms=self.config.voice.silence_timeout_ms,
+            min_speech_duration_ms=self.config.voice.min_speech_duration_ms,
+            pre_speech_padding_ms=self.config.voice.pre_roll_ms,
+            vad_sensitivity=self.config.voice.vad_sensitivity,
+            echo_suppressor=self.echo_suppressor,
         )
         self.local_wake_detector = LocalAcousticWakeDetector(
             sensitivity=self.config.voice.wake_sensitivity
@@ -119,7 +132,21 @@ class ContinuousVoiceEngine:
         self.stt = FasterWhisperSTT(self.config)
         self.tts = LanguageAwareTTSRouter(self.config)
         self.player = AudioPlayerService(
-            output_device_index=self.config.voice.output_device_index
+            output_device_index=self.config.voice.output_device_index,
+            echo_suppressor=self.echo_suppressor,
+        )
+
+        # Gemini Live native real-time speech-to-speech subsystems
+        self.gemini_live_client = GeminiLiveClient(
+            model=self.config.voice.gemini_live_model,
+            voice_name=self.config.voice.gemini_live_voice,
+        )
+        self.pcm_player = PCMStreamPlayer(
+            output_device_index=self.config.voice.output_device_index,
+            echo_suppressor=self.echo_suppressor,
+        )
+        self.audio_streamer = AudioStreamerBridge(
+            client=self.gemini_live_client
         )
 
         # State machine
@@ -130,6 +157,13 @@ class ContinuousVoiceEngine:
         self._last_spoken_response: str = ""
         self._conversation_turn_active: bool = False
         self._last_turn_time: float = 0.0
+
+        # Latency metrics
+        self.last_speech_detection_latency_ms: float = 0.0
+        self.last_interruption_latency_ms: float = 0.0
+        self.last_gemini_response_latency_ms: float = 0.0
+        self.last_total_turnaround_latency_ms: float = 0.0
+        self._speech_onset_time: float = 0.0
 
         # Background async worker
         self._async_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -169,6 +203,7 @@ class ContinuousVoiceEngine:
         """Connect audio capture chunks to VAD, wake word detector, and player."""
         self.audio_capture.add_chunk_callback(self._on_audio_chunk)
         self.audio_capture.add_level_callback(self._on_audio_level)
+        self.audio_capture.add_confidence_callback(self._on_speech_confidence)
 
         self.vad.on_speech_started = self._on_vad_speech_started
         self.vad.on_speech_ended = self._on_vad_speech_ended
@@ -176,6 +211,20 @@ class ContinuousVoiceEngine:
         self.player.on_playback_started = self._on_player_started
         self.player.on_playback_finished = self._on_player_finished
         self.player.on_playback_interrupted = self._on_player_interrupted
+
+        # Gemini Live & PCM Stream callbacks
+        self.gemini_live_client.on_status_changed = self._on_live_status_changed
+        self.gemini_live_client.on_latency_measured = self._on_live_latency_measured
+        self.gemini_live_client.on_audio_chunk = self._on_live_audio_chunk
+        self.gemini_live_client.on_transcript_chunk = self._on_live_transcript_chunk
+        self.gemini_live_client.on_user_transcript = self._on_live_user_transcript
+        self.gemini_live_client.on_turn_complete = self._on_live_turn_complete
+        self.gemini_live_client.on_interrupted = self._on_live_interrupted
+        self.gemini_live_client.on_error = self._on_live_error
+
+        self.pcm_player.on_playback_started = self._on_player_started
+        self.pcm_player.on_playback_finished = self._on_pcm_playback_finished
+        self.pcm_player.on_playback_interrupted = self._on_player_interrupted
 
     # --------------------------------------------------------------------------
     # Audio Stream Processing & Interruption Monitoring
@@ -205,19 +254,30 @@ class ContinuousVoiceEngine:
                 self._handle_wake_word_detected()
             return
 
-        # 3. State: SPEAKING — Check for Barge-in Interruption
+        # 3. State: SPEAKING — Check for Barge-in Interruption using Echo-Cancelled VAD
         if current_state == VoiceState.SPEAKING:
+            if self.config.voice.voice_mode == "gemini_live":
+                # Feed frame into streamer (held safely in pre-roll during playback)
+                self.audio_streamer.feed_frame(chunk)
+
             if self.config.voice.enable_barge_in:
-                # Acoustic energy check for interruption with loopback guard
-                rms = float(np.sqrt(np.mean(chunk**2)))
-                # Elevation over baseline speaker audio to distinguish user interruption
-                if rms > 0.08:
-                    logger.info("Barge-in speech interruption detected (RMS=%.3f)!", rms)
+                t_eval_start = time.perf_counter()
+                is_human, reason = self.vad.is_confirmed_human_speech(
+                    chunk,
+                    check_echo=self.config.voice.enable_echo_cancellation,
+                )
+                if is_human:
+                    t_eval_end = time.perf_counter()
+                    self.last_speech_detection_latency_ms = (t_eval_end - t_eval_start) * 1000.0
+                    logger.info("Confirmed human speech barge-in (%s)! Halting HAKS playback.", reason)
                     self._handle_barge_in_interruption()
             return
 
         # 4. State: LISTENING — Feed to VAD to detect user speech turn
         if current_state == VoiceState.LISTENING:
+            if self.config.voice.voice_mode == "gemini_live":
+                self.audio_streamer.feed_frame(chunk)
+
             self.vad.process_frame(chunk)
 
             # Check continuous conversation timeout (e.g. 45s of idling in LISTENING)
@@ -225,12 +285,25 @@ class ContinuousVoiceEngine:
                 if time.time() - self._last_turn_time > self.config.voice.conversation_timeout_seconds:
                     logger.info("Continuous conversation timeout. Returning to STANDBY.")
                     self._conversation_turn_active = False
+                    if self.config.voice.voice_mode == "gemini_live":
+                        self.audio_streamer.stop_streaming()
                     self._set_state(VoiceState.STANDBY)
 
     def _on_audio_level(self, level: float) -> None:
         """Broadcast live VU meter level to UI."""
         if self.controller and hasattr(self.controller, "events"):
-            self.controller.events.voice_audio_level_updated.emit(level)
+            try:
+                self.controller.events.voice_audio_level_updated.emit(level)
+            except Exception:
+                pass
+
+    def _on_speech_confidence(self, confidence: float) -> None:
+        """Broadcast live speech confidence (0.0 to 1.0) to UI."""
+        if self.controller and hasattr(self.controller, "events") and hasattr(self.controller.events, "voice_speech_confidence_updated"):
+            try:
+                self.controller.events.voice_speech_confidence_updated.emit(confidence)
+            except Exception:
+                pass
 
     # --------------------------------------------------------------------------
     # VAD Event Handlers
@@ -238,22 +311,31 @@ class ContinuousVoiceEngine:
 
     def _on_vad_speech_started(self) -> None:
         """VAD confirmed user began speaking."""
+        self._speech_onset_time = time.time()
         if self._state == VoiceState.LISTENING:
             logger.info("VAD: User speech initiated.")
             if self.controller and hasattr(self.controller, "events"):
                 self.controller.events.voice_speech_started.emit()
 
     def _on_vad_speech_ended(self, speech_audio: np.ndarray) -> None:
-        """VAD confirmed user finished speaking turn. Transition to PROCESSING."""
+        """VAD confirmed user finished speaking turn."""
         if self._state != VoiceState.LISTENING:
             return
 
-        logger.info("VAD: User speech completed (%.2fs audio).", len(speech_audio) / 16000.0)
+        speech_duration_sec = len(speech_audio) / 16000.0
+        logger.info("VAD: User speech completed (%.2fs audio).", speech_duration_sec)
+
+        # In Gemini Live mode, mark speech end for latency metrics
+        if self.config.voice.voice_mode == "gemini_live" and self.gemini_live_client.is_connected():
+            self.gemini_live_client.mark_speech_turn_ended()
+            self._set_state(VoiceState.THINKING)
+            return
+
         self._set_state(VoiceState.PROCESSING)
         if self.controller and hasattr(self.controller, "events"):
             self.controller.events.voice_speech_ended.emit()
 
-        # Schedule async processing
+        # Schedule async processing for pipeline/offline modes or when Gemini Live is offline
         if self._async_loop and self._async_loop.is_running():
             asyncio.run_coroutine_threadsafe(
                 self._process_speech_turn(speech_audio),
@@ -272,18 +354,35 @@ class ContinuousVoiceEngine:
         self._last_turn_time = time.time()
         self.vad.reset()
 
+        if self.config.voice.voice_mode == "gemini_live":
+            if self._async_loop and self._async_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self._ensure_gemini_live_ready(),
+                    self._async_loop,
+                )
+
         # Automatically transition to LISTENING after 300ms
         def _activate_listening():
             if not self._stop_event.wait(0.3) and not self._stop_event.is_set():
                 if self._state == VoiceState.WAKE_DETECTED:
                     self._set_state(VoiceState.LISTENING)
+                    if self.config.voice.voice_mode == "gemini_live":
+                        self.audio_streamer.start_streaming(self._async_loop)
 
         self._executor.submit(_activate_listening)
 
     def _handle_barge_in_interruption(self) -> None:
         """User spoke while HAKS was speaking. Immediately stop playback."""
+        t_stop_start = time.perf_counter()
         self._set_state(VoiceState.INTERRUPTED)
         self.player.stop()
+        self.pcm_player.stop()
+        self.audio_streamer.set_playback_active(False)
+        self.audio_streamer.flush_held_frames()
+        t_stop_end = time.perf_counter()
+        self.last_interruption_latency_ms = (t_stop_end - t_stop_start) * 1000.0
+        logger.info("Barge-in playback stop latency: %.2f ms", self.last_interruption_latency_ms)
+
         if self.controller and hasattr(self.controller, "events"):
             self.controller.events.voice_interrupted.emit()
 
@@ -291,19 +390,23 @@ class ContinuousVoiceEngine:
         self._last_turn_time = time.time()
         # Return to listening after short debounce
         def _back_to_listen():
-            if not self._stop_event.wait(0.2) and not self._stop_event.is_set():
+            if not self._stop_event.wait(0.08) and not self._stop_event.is_set():
                 if self._state == VoiceState.INTERRUPTED:
                     self._set_state(VoiceState.LISTENING)
+                    if self.config.voice.voice_mode == "gemini_live":
+                        self.audio_streamer.start_streaming(self._async_loop)
 
         self._executor.submit(_back_to_listen)
 
     def _on_player_started(self) -> None:
         if self._state == VoiceState.SPEAKING:
+            self.audio_streamer.set_playback_active(True)
             if self.controller and hasattr(self.controller, "events"):
                 self.controller.events.voice_speaking_started.emit(self._last_spoken_response)
 
     def _on_player_finished(self) -> None:
         """Audio playback completed naturally."""
+        self.audio_streamer.set_playback_active(False)
         if self._state == VoiceState.SPEAKING:
             if self.controller and hasattr(self.controller, "events"):
                 self.controller.events.voice_speaking_finished.emit()
@@ -313,9 +416,13 @@ class ContinuousVoiceEngine:
                 self.vad.reset()
                 self._last_turn_time = time.time()
                 self._set_state(VoiceState.LISTENING)
+                if self.config.voice.voice_mode == "gemini_live":
+                    self.audio_streamer.start_streaming(self._async_loop)
             else:
                 self._conversation_turn_active = False
                 self._set_state(VoiceState.STANDBY)
+                if self.config.voice.voice_mode == "gemini_live":
+                    self.audio_streamer.stop_streaming()
 
     def _on_player_interrupted(self) -> None:
         logger.info("Audio player interrupted by barge-in.")
@@ -579,6 +686,8 @@ class ContinuousVoiceEngine:
         self._stop_event.set()
         logger.info("Stopping Continuous Voice Assistant...")
         self.player.stop()
+        self.pcm_player.stop()
+        self.audio_streamer.stop_streaming()
         self.audio_capture.stop()
         self.vad.reset()
         self._conversation_turn_active = False
@@ -590,6 +699,15 @@ class ContinuousVoiceEngine:
             self.stop()
         except Exception:
             pass
+        if hasattr(self, "gemini_live_client") and self.gemini_live_client:
+            if self._async_loop and self._async_loop.is_running():
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        self.gemini_live_client.disconnect(),
+                        self._async_loop,
+                    )
+                except Exception:
+                    pass
         if hasattr(self, "_executor") and self._executor is not None:
             try:
                 self._executor.shutdown(wait=False, cancel_futures=True)
@@ -619,10 +737,19 @@ class ContinuousVoiceEngine:
             self.start()
         logger.info("Push-to-talk triggered. Activating LISTENING state.")
         self.player.stop()
+        self.pcm_player.stop()
         self.vad.reset()
         self._conversation_turn_active = True
         self._last_turn_time = time.time()
         self._set_state(VoiceState.LISTENING)
+
+        if self.config.voice.voice_mode == "gemini_live":
+            if self._async_loop and self._async_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self._ensure_gemini_live_ready(),
+                    self._async_loop,
+                )
+            self.audio_streamer.start_streaming(self._async_loop)
 
     def toggle_mute(self) -> bool:
         """Toggle microphone mute."""
@@ -631,6 +758,166 @@ class ContinuousVoiceEngine:
         if self.controller and hasattr(self.controller, "events"):
             self.controller.events.voice_mute_toggled.emit(new_mute)
         return new_mute
+
+    def set_voice_mode(self, mode: str) -> None:
+        """Update active voice processing mode ('gemini_live', 'pipeline', 'offline')."""
+        if mode not in ("gemini_live", "pipeline", "offline"):
+            logger.warning("Invalid voice mode '%s'; defaulting to 'gemini_live'.", mode)
+            mode = "gemini_live"
+
+        self.config.voice.voice_mode = mode
+        logger.info("Voice Assistant mode changed to: %s", mode)
+
+        if self.controller:
+            self.controller.set_setting("voice_mode", mode, section="voice")
+
+        if mode == "gemini_live" and self._state == VoiceState.LISTENING:
+            if self._async_loop and self._async_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self._ensure_gemini_live_ready(),
+                    self._async_loop,
+                )
+                self.audio_streamer.start_streaming(self._async_loop)
+        elif mode != "gemini_live":
+            self.audio_streamer.stop_streaming()
+
+    # --------------------------------------------------------------------------
+    # Gemini Live Callbacks & Helpers
+    # --------------------------------------------------------------------------
+
+    def _build_live_system_instruction(self) -> str:
+        """Construct bilingual persona with approved memory context and privacy protections."""
+        base = (
+            "You are HAKS, a private, fast, bilingual personal AI assistant operating on Windows. "
+            "You speak English and Tamil fluently, and easily understand Tanglish (Tamil written in English script or code-mixed speech). "
+            "Keep your spoken answers concise, direct, helpful, and natural. "
+            "Do not output markdown asterisks or bullet formatting in spoken audio."
+        )
+        if self.controller and hasattr(self.controller, "context_builder"):
+            try:
+                mem_context = self.controller.context_builder.build_context(
+                    query="user profile preferences work background",
+                    include_personal=True,
+                    include_work=True,
+                    top_k_per_domain=2,
+                    min_relevance=0.25,
+                )
+                if mem_context:
+                    base += f"\n\nContext and approved memories:\n{mem_context}"
+            except Exception as mem_exc:
+                logger.debug("Could not inject memory context for Gemini Live: %s", mem_exc)
+        return base
+
+    async def _ensure_gemini_live_ready(self) -> bool:
+        """Ensure GeminiLiveClient is connected with current approved system instructions & memories."""
+        if self.gemini_live_client.is_connected():
+            return True
+
+        system_instruction = self._build_live_system_instruction()
+        self.gemini_live_client.system_instruction = system_instruction
+        self.gemini_live_client.model = self.config.voice.gemini_live_model
+        self.gemini_live_client.voice_name = self.config.voice.gemini_live_voice
+
+        success = await self.gemini_live_client.connect()
+        if not success:
+            logger.warning("Gemini Live connection failed; falling back to pipeline mode.")
+            return False
+        return True
+
+    def _on_live_status_changed(self, status: LiveConnectionStatus) -> None:
+        """Forward Live API status to UI."""
+        if self.controller and hasattr(self.controller, "events"):
+            self.controller.events.voice_live_status_changed.emit(status.value)
+
+    def _on_live_latency_measured(self, latency_ms: float) -> None:
+        """Forward response latency to UI and calculate turnaround latency."""
+        self.last_gemini_response_latency_ms = latency_ms
+        if self._speech_onset_time > 0:
+            self.last_total_turnaround_latency_ms = latency_ms + self.config.voice.silence_timeout_ms
+        if self.controller and hasattr(self.controller, "events"):
+            self.controller.events.voice_live_latency_updated.emit(latency_ms)
+
+    def _on_live_audio_chunk(self, data: bytes) -> None:
+        """Handle incoming 24 kHz linear PCM chunk from Gemini Live."""
+        if self._state != VoiceState.SPEAKING:
+            self._set_state(VoiceState.SPEAKING)
+            self.audio_streamer.set_playback_active(True)
+        self.pcm_player.write_chunk(data)
+
+    def _on_live_transcript_chunk(self, text: str) -> None:
+        """Accumulate assistant response text chunks."""
+        pass
+
+    def _on_live_user_transcript(self, text: str) -> None:
+        """Handle real-time user speech transcript from Live API."""
+        cleaned = text.strip()
+        if not cleaned:
+            return
+        self._last_user_transcript = cleaned
+        logger.info("Gemini Live User Speech: '%s'", cleaned)
+        if self.controller and hasattr(self.controller, "events"):
+            self.controller.events.voice_transcript_received.emit(cleaned, self.config.voice.preferred_language)
+
+        cmd_type = self._parse_voice_command(cleaned)
+        if cmd_type != VoiceCommandType.NONE:
+            if self._async_loop and self._async_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self._execute_voice_command(cmd_type),
+                    self._async_loop,
+                )
+
+    def _on_live_turn_complete(self, full_text: str) -> None:
+        """Handle Gemini Live turn completion."""
+        self._last_spoken_response = full_text
+        self.pcm_player.mark_turn_complete()
+        if self.controller and full_text:
+            try:
+                if self._last_user_transcript:
+                    self.controller.send_message(self._last_user_transcript, role="user")
+                self.controller.send_message(
+                    full_text,
+                    role="assistant",
+                    metadata={"engine": "gemini_live", "model": self.gemini_live_client.model},
+                )
+            except Exception as e:
+                logger.debug("Could not record live turn in conversation db: %s", e)
+
+    def _on_live_interrupted(self) -> None:
+        """Server-side barge-in signal received from Gemini Live."""
+        is_playing = self.pcm_player.is_playing or self.player.is_playing
+        if is_playing and self.echo_suppressor.is_playback_active():
+            if self.vad._consecutive_barge_in_speech_frames < 2:
+                logger.info("Ignoring spurious Gemini Live server-side interruption caused by speaker acoustic feedback.")
+                return
+
+        logger.info("Gemini Live server-side barge-in confirmed.")
+        self._handle_barge_in_interruption()
+
+    def _on_live_error(self, err_msg: str) -> None:
+        """Log Live error and notify controller."""
+        logger.warning("Gemini Live encountered error: %s", err_msg)
+        if self.controller and hasattr(self.controller, "events"):
+            self.controller.events.voice_error_occurred.emit(err_msg)
+
+    def _on_pcm_playback_finished(self) -> None:
+        """24 kHz audio playback completed naturally."""
+        self.audio_streamer.set_playback_active(False)
+        if self._state == VoiceState.SPEAKING:
+            if self.controller and hasattr(self.controller, "events"):
+                self.controller.events.voice_speaking_finished.emit()
+
+            if self.config.voice.continuous_mode:
+                logger.info("Continuous mode: returning to LISTENING for next turn.")
+                self.vad.reset()
+                self._last_turn_time = time.time()
+                self._set_state(VoiceState.LISTENING)
+                if self.config.voice.voice_mode == "gemini_live":
+                    self.audio_streamer.start_streaming(self._async_loop)
+            else:
+                self._conversation_turn_active = False
+                self._set_state(VoiceState.STANDBY)
+                if self.config.voice.voice_mode == "gemini_live":
+                    self.audio_streamer.stop_streaming()
 
     def _start_async_worker(self) -> None:
         """Start a dedicated background thread running an asyncio event loop."""

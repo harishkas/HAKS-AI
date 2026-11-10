@@ -897,6 +897,73 @@ class AppController:
         if hasattr(self, "voice_engine") and self.voice_engine:
             self.voice_engine._handle_barge_in_interruption()
 
+    def get_voice_mode(self) -> str:
+        """Return active voice mode ('gemini_live', 'pipeline', 'offline')."""
+        saved = self.get_setting("voice_mode", self.config.voice.voice_mode)
+        return saved
+
+    def set_voice_mode(self, mode: str) -> None:
+        """Update and persist active voice mode."""
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            self.voice_engine.set_voice_mode(mode)
+        else:
+            self.config.voice.voice_mode = mode
+            self.set_setting("voice_mode", mode, section="voice")
+
+    def set_noise_suppression_enabled(self, enabled: bool) -> None:
+        """Enable or disable real-time background noise suppression."""
+        self.config.voice.enable_noise_suppression = enabled
+        self.set_setting("enable_noise_suppression", str(enabled).lower(), section="voice")
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            self.voice_engine.audio_capture.pipeline.enable_noise_suppression = enabled
+
+    def set_echo_cancellation_enabled(self, enabled: bool) -> None:
+        """Enable or disable acoustic echo cancellation."""
+        self.config.voice.enable_echo_cancellation = enabled
+        self.set_setting("enable_echo_cancellation", str(enabled).lower(), section="voice")
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            self.voice_engine.audio_capture.pipeline.enable_aec = enabled
+
+    def set_noise_suppression_strength(self, strength: str) -> None:
+        """Configure noise suppression aggressiveness ('low', 'medium', 'high', 'ultra')."""
+        self.config.voice.noise_suppression_strength = strength
+        self.set_setting("noise_suppression_strength", strength, section="voice")
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            self.voice_engine.audio_capture.pipeline.noise_suppressor.set_strength(strength)
+
+    def set_mic_gain(self, gain: float) -> None:
+        """Configure microphone input gain (0.2x to 3.0x)."""
+        self.config.voice.mic_input_gain = gain
+        self.set_setting("mic_input_gain", str(gain), section="voice")
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            self.voice_engine.audio_capture.pipeline.dc_normalizer.set_gain(gain)
+
+    def set_human_speech_sensitivity(self, sensitivity: float) -> None:
+        """Configure human speech detection sensitivity (0.1 to 1.0)."""
+        self.config.voice.human_speech_sensitivity = sensitivity
+        self.set_setting("human_speech_sensitivity", str(sensitivity), section="voice")
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            self.voice_engine.audio_capture.pipeline.vad_detector.set_sensitivity(sensitivity)
+
+    def set_voice_interruption_sensitivity(self, sensitivity: float) -> None:
+        """Configure voice interruption (barge-in) sensitivity (0.1 to 1.0)."""
+        self.config.voice.voice_interruption_sensitivity = sensitivity
+        self.set_setting("voice_interruption_sensitivity", str(sensitivity), section="voice")
+
+    def calibrate_noise_floor(self) -> None:
+        """Start dynamic background noise calibration."""
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            self.voice_engine.audio_capture.calibrate_noise_floor()
+
+    def finish_noise_calibration(self) -> float:
+        """Finish dynamic background noise calibration."""
+        if hasattr(self, "voice_engine") and self.voice_engine:
+            floor = self.voice_engine.audio_capture.finish_noise_calibration()
+            if hasattr(self, "events") and hasattr(self.events, "voice_noise_floor_updated"):
+                self.events.voice_noise_floor_updated.emit(floor)
+            return floor
+        return 0.005
+
     # --------------------------------------------------------------------------
     # Storage Architecture & Persistence Management
     # --------------------------------------------------------------------------

@@ -17,6 +17,7 @@ except ImportError:
     sd = None
 
 from config.settings import AppConfig, get_settings
+from voice.dsp import AudioProcessingPipeline, ProcessedAudioFrame
 from voice.models import AudioDevice
 
 logger = logging.getLogger("haks.voice.audio_capture")
@@ -36,16 +37,21 @@ class AudioCaptureService:
         self._is_muted: bool = False
         self._device_index: Optional[int] = self.config.voice.input_device_index
 
+        # Unified Audio Processing Pipeline (DC removal, HPF, Hum notch, AEC, NS, Enhancer, VAD)
+        self.pipeline = AudioProcessingPipeline(self.config, sample_rate=self.sample_rate)
+
         # Thread-safe ring buffer holding the most recent 10 seconds of audio frames
         self._max_buffer_frames = int((16000 / self.block_size) * 10)
         self._ring_buffer: deque[np.ndarray] = deque(maxlen=self._max_buffer_frames)
         self._buffer_lock = threading.Lock()
 
-        # Listeners for real-time chunks and audio level updates
+        # Listeners for real-time chunks, audio levels, and speech confidence
         self._chunk_callbacks: list[Callable[[np.ndarray], None]] = []
         self._level_callbacks: list[Callable[[float], None]] = []
+        self._confidence_callbacks: list[Callable[[float], None]] = []
 
         self._current_audio_level: float = 0.0
+        self._current_speech_confidence: float = 0.0
 
     @property
     def is_capturing(self) -> bool:
@@ -77,6 +83,23 @@ class AudioCaptureService:
     def remove_level_callback(self, callback: Callable[[float], None]) -> None:
         if callback in self._level_callbacks:
             self._level_callbacks.remove(callback)
+
+    def add_confidence_callback(self, callback: Callable[[float], None]) -> None:
+        """Register a callback for live speech confidence (0.0 to 1.0)."""
+        if callback not in self._confidence_callbacks:
+            self._confidence_callbacks.append(callback)
+
+    def remove_confidence_callback(self, callback: Callable[[float], None]) -> None:
+        if callback in self._confidence_callbacks:
+            self._confidence_callbacks.remove(callback)
+
+    def calibrate_noise_floor(self) -> None:
+        """Begin room ambient noise calibration."""
+        self.pipeline.calibrate_noise_floor()
+
+    def finish_noise_calibration(self) -> float:
+        """Finish room ambient noise calibration and return baseline noise floor."""
+        return self.pipeline.finish_noise_calibration()
 
     @staticmethod
     def list_input_devices() -> list[AudioDevice]:
@@ -114,6 +137,7 @@ class AudioCaptureService:
             return
         self._device_index = index
         logger.info("Setting audio input device index to: %s", index)
+        self.pipeline.handle_device_change()
         if self._is_capturing:
             self.stop()
             self.start()
@@ -177,13 +201,21 @@ class AudioCaptureService:
         if self._is_muted:
             chunk = np.zeros_like(indata[:, 0], dtype=np.float32)
             level = 0.0
+            confidence = 0.0
         else:
-            chunk = indata[:, 0].copy()
+            raw_chunk = indata[:, 0].copy()
+            # Process through unified AudioProcessingPipeline
+            # (DC removal, rumble HPF, 50/60Hz notch, AEC, noise suppression, speech enhancement, VAD)
+            processed: ProcessedAudioFrame = self.pipeline.process_frame(raw_chunk)
+            chunk = processed.cleaned_frame
+            confidence = processed.speech_confidence
+
             # Calculate RMS audio level normalized between 0.0 and 1.0
             rms = float(np.sqrt(np.mean(chunk**2)))
             level = min(1.0, rms * 5.0)  # Scale up for responsive visual VU meter
 
         self._current_audio_level = level
+        self._current_speech_confidence = confidence
 
         with self._buffer_lock:
             self._ring_buffer.append(chunk)
@@ -200,6 +232,12 @@ class AudioCaptureService:
                 lvl_cb(level)
             except Exception as e:
                 logger.error("Error in audio level callback: %s", e)
+
+        for conf_cb in list(self._confidence_callbacks):
+            try:
+                conf_cb(confidence)
+            except Exception as e:
+                logger.error("Error in audio confidence callback: %s", e)
 
     def get_buffered_audio(self, duration_seconds: float) -> np.ndarray:
         """Retrieve recent audio up to `duration_seconds` as a single 1D numpy array."""
