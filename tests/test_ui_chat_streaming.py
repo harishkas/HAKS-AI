@@ -163,6 +163,7 @@ def test_conversation_context_privacy(controller: AppController):
 def test_chat_view_retry_flow(qapp, controller: AppController):
     """Verify Retry button appears upon inference failure and can re-trigger inference."""
     view = ChatView(controller=controller)
+    view.combo_routing_mode.setCurrentIndex(2)  # Force Local-Only for Ollama test
 
     # Initial state: retry button hidden
     assert view.btn_retry.isHidden() is True

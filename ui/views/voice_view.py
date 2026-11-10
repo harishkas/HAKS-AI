@@ -122,6 +122,35 @@ class VoiceView(QWidget):
         vu_box.addWidget(self.vu_meter, stretch=1)
         sc_layout.addLayout(vu_box)
 
+        # Live Speech Probability Meter
+        prob_box = QHBoxLayout()
+        lbl_prob = QLabel("Speech Prob:")
+        lbl_prob.setStyleSheet("color: #4b5563; font-size: 11px;")
+        self.prob_meter = QProgressBar()
+        self.prob_meter.setRange(0, 100)
+        self.prob_meter.setValue(0)
+        self.prob_meter.setFixedHeight(8)
+        self.prob_meter.setTextVisible(False)
+        self.prob_meter.setStyleSheet(
+            """
+            QProgressBar {
+                background-color: #f3f4f6;
+                border-radius: 4px;
+                border: 1px solid #d1d5db;
+            }
+            QProgressBar::chunk {
+                background-color: #0284c7;
+                border-radius: 4px;
+            }
+            """
+        )
+        self.lbl_prob_val = QLabel("0%")
+        self.lbl_prob_val.setStyleSheet("color: #0284c7; font-size: 11px; font-weight: 600; min-width: 35px;")
+        prob_box.addWidget(lbl_prob)
+        prob_box.addWidget(self.prob_meter, stretch=1)
+        prob_box.addWidget(self.lbl_prob_val)
+        sc_layout.addLayout(prob_box)
+
         layout.addWidget(self.state_card)
 
         # 3. Live Transcripts Card
@@ -233,6 +262,94 @@ class VoiceView(QWidget):
 
         layout.addWidget(hw_card)
 
+        # 5.5 WebRTC APM & Silero VAD Configuration Card
+        apm_card = QFrame()
+        apm_card.setProperty("class", "stat_card")
+        apm_layout = QVBoxLayout(apm_card)
+        apm_layout.setSpacing(10)
+
+        apm_title = QLabel("WEBRTC AUDIO PROCESSING (APM) & ADVANCED VAD")
+        apm_title.setProperty("class", "card_title")
+        apm_layout.addWidget(apm_title)
+
+        # VAD Engine Selector
+        vad_eng_row = QHBoxLayout()
+        lbl_vad_eng = QLabel("VAD Engine:")
+        lbl_vad_eng.setStyleSheet("color: #4b5563; font-size: 12px; width: 140px;")
+        self.combo_vad_engine = QComboBox()
+        self.combo_vad_engine.addItem("Silero VAD (Deep Learning - Neural)", "silero")
+        self.combo_vad_engine.addItem("WebRTC VAD (Lightweight GMM Fallback)", "webrtc")
+        self.combo_vad_engine.currentIndexChanged.connect(self._on_vad_engine_changed)
+        vad_eng_row.addWidget(lbl_vad_eng)
+        vad_eng_row.addWidget(self.combo_vad_engine)
+        vad_eng_row.addStretch()
+        apm_layout.addLayout(vad_eng_row)
+
+        # AEC & NS Checkboxes
+        self.chk_aec = QCheckBox("Enable Acoustic Echo Cancellation (AEC - speaker output loopback suppression)")
+        self.chk_aec.setChecked(getattr(self.controller.config.voice, "enable_aec", True))
+        self.chk_aec.toggled.connect(self._on_aec_toggled)
+        apm_layout.addWidget(self.chk_aec)
+
+        self.chk_ns = QCheckBox("Enable WebRTC Noise Suppression (NS - filter fan noise, typing, room hum)")
+        self.chk_ns.setChecked(getattr(self.controller.config.voice, "enable_ns", True))
+        self.chk_ns.toggled.connect(self._on_ns_toggled)
+        apm_layout.addWidget(self.chk_ns)
+
+        # VAD Sensitivity / Speech Threshold Slider
+        sens_row = QHBoxLayout()
+        lbl_v_sens = QLabel("VAD Sensitivity (Threshold):")
+        lbl_v_sens.setStyleSheet("color: #4b5563; font-size: 12px; width: 180px;")
+        self.slider_vad_sens = QSlider(Qt.Orientation.Horizontal)
+        self.slider_vad_sens.setRange(10, 95)
+        cur_thresh = getattr(self.controller.config.voice, "silero_threshold", 0.55)
+        self.slider_vad_sens.setValue(int(cur_thresh * 100))
+        self.lbl_vad_sens_val = QLabel(f"{cur_thresh:.2f}")
+        self.slider_vad_sens.valueChanged.connect(self._on_vad_sens_changed)
+        sens_row.addWidget(lbl_v_sens)
+        sens_row.addWidget(self.slider_vad_sens, stretch=1)
+        sens_row.addWidget(self.lbl_vad_sens_val)
+        apm_layout.addLayout(sens_row)
+
+        # Minimum Speech Duration Slider
+        dur_row = QHBoxLayout()
+        lbl_dur = QLabel("Minimum Speech Duration:")
+        lbl_dur.setStyleSheet("color: #4b5563; font-size: 12px; width: 180px;")
+        self.slider_min_speech = QSlider(Qt.Orientation.Horizontal)
+        self.slider_min_speech.setRange(50, 500)
+        cur_dur = getattr(self.controller.config.voice, "min_speech_duration_ms", 150)
+        self.slider_min_speech.setValue(cur_dur)
+        self.lbl_min_speech_val = QLabel(f"{cur_dur} ms")
+        self.slider_min_speech.valueChanged.connect(self._on_min_speech_changed)
+        dur_row.addWidget(lbl_dur)
+        dur_row.addWidget(self.slider_min_speech, stretch=1)
+        dur_row.addWidget(self.lbl_min_speech_val)
+        apm_layout.addLayout(dur_row)
+
+        # End of Speech Silence Timeout Slider
+        sil_row = QHBoxLayout()
+        lbl_sil = QLabel("End-of-Speech Silence:")
+        lbl_sil.setStyleSheet("color: #4b5563; font-size: 12px; width: 180px;")
+        self.slider_silence = QSlider(Qt.Orientation.Horizontal)
+        self.slider_silence.setRange(150, 1200)
+        cur_sil = getattr(self.controller.config.voice, "end_of_speech_silence_ms", 450)
+        self.slider_silence.setValue(cur_sil)
+        self.lbl_silence_val = QLabel(f"{cur_sil} ms")
+        self.slider_silence.valueChanged.connect(self._on_silence_changed)
+        sil_row.addWidget(lbl_sil)
+        sil_row.addWidget(self.slider_silence, stretch=1)
+        sil_row.addWidget(self.lbl_silence_val)
+        apm_layout.addLayout(sil_row)
+
+        # Live APM Status & CPU Inference Timing
+        self.lbl_telemetry = QLabel("APM Status: Ready | Inference: 0.16 ms | Engine: Silero VAD (ONNX)")
+        self.lbl_telemetry.setStyleSheet(
+            "background-color: #f3f4f6; border-radius: 4px; padding: 6px 10px; color: #1f2937; font-size: 11px; font-family: monospace;"
+        )
+        apm_layout.addWidget(self.lbl_telemetry)
+
+        layout.addWidget(apm_card)
+
         # 6. Bilingual Speech & Voice Synthesis Card
         speech_card = QFrame()
         speech_card.setProperty("class", "stat_card")
@@ -322,8 +439,15 @@ class VoiceView(QWidget):
         self.controller.events.voice_state_changed.connect(self._update_ui_state)
         self.controller.events.voice_mute_toggled.connect(self._update_mic_ui)
         self.controller.events.voice_audio_level_updated.connect(self._update_vu_meter)
+        if hasattr(self.controller.events, "voice_speech_prob_updated"):
+            self.controller.events.voice_speech_prob_updated.connect(self._update_speech_prob)
         self.controller.events.voice_transcript_received.connect(self._update_user_transcript)
         self.controller.events.voice_speaking_started.connect(self._update_spoken_response)
+
+        # Telemetry timer
+        self._telemetry_timer = QTimer(self)
+        self._telemetry_timer.timeout.connect(self._update_telemetry)
+        self._telemetry_timer.start(500)
 
     def _load_initial_values(self) -> None:
         """Populate device lists and configuration controls."""
@@ -352,6 +476,13 @@ class VoiceView(QWidget):
         for i in range(self.lang_combo.count()):
             if self.lang_combo.itemData(i) == pref_lang:
                 self.lang_combo.setCurrentIndex(i)
+                break
+
+        # Set VAD Engine
+        cur_vad = getattr(self.controller.config.voice, "vad_engine", "silero")
+        for i in range(self.combo_vad_engine.count()):
+            if self.combo_vad_engine.itemData(i) == cur_vad:
+                self.combo_vad_engine.setCurrentIndex(i)
                 break
 
     # --------------------------------------------------------------------------
@@ -403,7 +534,7 @@ class VoiceView(QWidget):
     def _on_device_changed(self, idx: int) -> None:
         dev_index = self.combo_devices.itemData(idx)
         if hasattr(self.controller, "voice_engine"):
-            self.controller.voice_engine.audio_capture.set_device_index(dev_index)
+            self.controller.voice_engine.set_input_device(dev_index)
         self.controller.config.voice.input_device_index = dev_index
 
     def _on_wake_engine_changed(self, idx: int) -> None:
@@ -458,6 +589,69 @@ class VoiceView(QWidget):
     def _update_vu_meter(self, level: float) -> None:
         val = int(min(100, max(0, level * 100)))
         self.vu_meter.setValue(val)
+
+    def _update_speech_prob(self, prob: float) -> None:
+        val = int(min(100, max(0, prob * 100)))
+        self.prob_meter.setValue(val)
+        self.lbl_prob_val.setText(f"{val}%")
+
+    def _update_telemetry(self) -> None:
+        """Periodic UI update of APM processing and VAD inference timing."""
+        if not hasattr(self.controller, "voice_engine") or self.controller.voice_engine is None:
+            return
+
+        engine = self.controller.voice_engine
+        apm_status = engine.apm.get_status()
+        vad_engine_name = engine.vad.engine_name
+        vad_latency = engine.vad.last_inference_latency_ms
+        fallback_flag = " [FALLBACK ACTIVE]" if engine.vad.is_fallback_active else ""
+
+        aec_str = "AEC: ON" if apm_status.aec_enabled else "AEC: OFF"
+        ns_str = "NS: ON" if apm_status.ns_enabled else "NS: OFF"
+        apm_lat = apm_status.last_process_latency_ms
+
+        telemetry_text = (
+            f"APM: {aec_str} | {ns_str} ({apm_lat:.2f}ms) | "
+            f"VAD: {vad_engine_name}{fallback_flag} ({vad_latency:.2f}ms) | "
+            f"Frames: {apm_status.frames_processed}"
+        )
+        self.lbl_telemetry.setText(telemetry_text)
+
+    def _on_vad_engine_changed(self, idx: int) -> None:
+        engine_name = self.combo_vad_engine.itemData(idx)
+        self.controller.config.voice.vad_engine = engine_name
+        if hasattr(self.controller, "voice_engine") and self.controller.voice_engine:
+            self.controller.voice_engine.vad.set_engine(engine_name)
+
+    def _on_aec_toggled(self, checked: bool) -> None:
+        self.controller.config.voice.enable_aec = checked
+        if hasattr(self.controller, "voice_engine") and self.controller.voice_engine:
+            self.controller.voice_engine.apm.enable_aec = checked
+
+    def _on_ns_toggled(self, checked: bool) -> None:
+        self.controller.config.voice.enable_ns = checked
+        if hasattr(self.controller, "voice_engine") and self.controller.voice_engine:
+            self.controller.voice_engine.apm.enable_ns = checked
+
+    def _on_vad_sens_changed(self, val: int) -> None:
+        sens = val / 100.0
+        self.lbl_vad_sens_val.setText(f"{sens:.2f}")
+        self.controller.config.voice.silero_threshold = sens
+        if hasattr(self.controller, "voice_engine") and self.controller.voice_engine:
+            self.controller.voice_engine.vad.speech_threshold = sens
+            self.controller.voice_engine.interruption_controller.speech_probability_threshold = sens
+
+    def _on_min_speech_changed(self, val: int) -> None:
+        self.lbl_min_speech_val.setText(f"{val} ms")
+        self.controller.config.voice.min_speech_duration_ms = val
+        if hasattr(self.controller, "voice_engine") and self.controller.voice_engine:
+            self.controller.voice_engine.vad.min_speech_duration_ms = val
+
+    def _on_silence_changed(self, val: int) -> None:
+        self.lbl_silence_val.setText(f"{val} ms")
+        self.controller.config.voice.end_of_speech_silence_ms = val
+        if hasattr(self.controller, "voice_engine") and self.controller.voice_engine:
+            self.controller.voice_engine.vad.set_silence_timeout(val)
 
     def _update_user_transcript(self, text: str, lang: str) -> None:
         lang_badge = f"<span style='color:#58a6ff;'>[{lang.upper()}]</span>"
